@@ -1,5 +1,12 @@
-"# test2" 
-创建并执行上述 Java 程序作为一个 Maven 项目的步骤如下：
+<dependencies>
+    <!-- Apache POI dependency for Excel file operations -->
+    <dependency>
+        <groupId>org.apache.poi</groupId>
+        <artifactId>poi-ooxml</artifactId>
+        <version>5.2.3</version> <!-- Use the latest version available -->
+    </dependency>
+</dependencies>
+
 
 启动 IntelliJ IDEA 并创建一个新的 Maven 项目：
 
