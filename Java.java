@@ -8,7 +8,7 @@ import org.json.JSONObject;
 public class GitHubCodeSearch {
 
     private static final String TOKEN = "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN";
-    private static final String QUERY = "abc+org:openai+is:public";
+    private static final String QUERY = "abc+org:openai+is:public+archived:false";
     private static final int PAGE = 1;
 
     public static void main(String[] args) {
