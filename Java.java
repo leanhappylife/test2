@@ -1,91 +1,46 @@
-import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.util.*;
+public class GitHubCodeSearch {
 
-public class SQLTableGenerator {
-
-    private static final String YES = "YES";
+    private static final String TOKEN = "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN";
+    private static final String QUERY = "abc+org:openai";
+    private static final int PAGE = 2;
 
     public static void main(String[] args) {
         try {
-            if (args.length < 1) {
-                System.out.println("Please provide the Excel file path as a command-line argument.");
-                return;
+            String url = String.format("https://api.github.com/search/code?q=%s&page=%d", QUERY, PAGE);
+            HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Authorization", "token " + TOKEN);
+            connection.setRequestProperty("Accept", "application/vnd.github.v3+json");
+
+            BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+            String inputLine;
+            StringBuilder content = new StringBuilder();
+            while ((inputLine = in.readLine()) != null) {
+                content.append(inputLine);
             }
 
-            String excelFilePath = args[0];
-            FileInputStream inputStream = new FileInputStream(excelFilePath);
+            in.close();
+            connection.disconnect();
 
-            Workbook workbook = new XSSFWorkbook(inputStream);
-            Sheet firstSheet = workbook.getSheetAt(0);
-            Iterator<Row> rowIterator = firstSheet.iterator();
+            JSONObject jsonResponse = new JSONObject(content.toString());
+            JSONArray items = jsonResponse.getJSONArray("items");
 
-            Map<String, List<String>> tableColumns = new LinkedHashMap<>();
-            Map<String, Set<String>> primaryKeys = new LinkedHashMap<>();
-
-            while (rowIterator.hasNext()) {
-                Row nextRow = rowIterator.next();
-                if (nextRow.getRowNum() == 0) continue; // skip header
-
-                // Get cell values with null checks
-                String schema = getCellValue(nextRow.getCell(0));
-                String tableName = getCellValue(nextRow.getCell(1));
-                String columnName = getCellValue(nextRow.getCell(3));
-                String dataType = getCellValue(nextRow.getCell(4));
-                boolean isPrimaryKey = YES.equals(getCellValue(nextRow.getCell(2)));
-
-                String fullTableName = schema + "." + tableName;
-                String columnDefinition = columnName + " " + dataType;
-
-                // Add column definition to table
-                tableColumns.computeIfAbsent(fullTableName, k -> new ArrayList<>()).add(columnDefinition);
-
-                // If it's a primary key, add it to the set of primary keys
-                if (isPrimaryKey) {
-                    primaryKeys.computeIfAbsent(fullTableName, k -> new LinkedHashSet<>()).add(columnName);
-                }
+            for (int i = 0; i < items.length(); i++) {
+                JSONObject item = items.getJSONObject(i);
+                String fileName = item.getString("name");
+                String repoName = item.getJSONObject("repository").getString("full_name");
+                System.out.printf("File: %s, Repository: %s%n", fileName, repoName);
             }
 
-            workbook.close();
-            inputStream.close();
-
-            // Generate and print SQL statements
-            tableColumns.forEach((tableName, columns) -> {
-                Set<String> pks = primaryKeys.get(tableName);
-                System.out.println(generateCreateTableSQL(tableName, columns, pks));
-            });
-
-        } catch (IOException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
-    }
-
-    private static String generateCreateTableSQL(String tableName, List<String> columns, Set<String> primaryKeys) {
-        StringBuilder createTableStatement = new StringBuilder();
-        createTableStatement.append("CREATE TABLE ").append(tableName).append(" (\n");
-
-        StringJoiner columnJoiner = new StringJoiner(",\n    ");
-        for (String column : columns) {
-            columnJoiner.add(column);
-        }
-
-        // Add primary key constraint if primary keys exist
-        if (primaryKeys != null && !primaryKeys.isEmpty()) {
-            StringJoiner pkJoiner = new StringJoiner(", ");
-            primaryKeys.forEach(pkJoiner::add);
-            columnJoiner.add("PRIMARY KEY (" + pkJoiner.toString() + ")");
-        }
-
-        createTableStatement.append(columnJoiner.toString());
-        createTableStatement.append("\n);");
-
-        return createTableStatement.toString();
-    }
-
-    private static String getCellValue(Cell cell) {
-        return cell == null ? "" : cell.getStringCellValue();
     }
 }
