@@ -117,6 +117,9 @@ public class GitHubCodeSearch {
                             hasMoreResults = false;
                             System.out.printf("Unexpected response code: %d%n", responseCode);
                         }
+                        
+                        // 延迟每个请求，减少请求频率
+                        Thread.sleep(2000); // 等待2秒
                     }
 
                 } catch (Exception e) {
