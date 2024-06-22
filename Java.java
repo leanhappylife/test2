@@ -1,46 +1,50 @@
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import org.json.JSONArray;
-import org.json.JSONObject;
+package com.example;
 
-public class GitHubCodeSearch {
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
-    private static final String TOKEN = "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN";
-    private static final String QUERY = "abc+org:openai+is:public+archived:false";
-    private static final int PAGE = 1;
+import java.io.IOException;
+
+public class GitHubRepoScraper {
+    private static final String GITHUB_SEARCH_URL = "https://github.com/search";
 
     public static void main(String[] args) {
-        try {
-            String url = String.format("https://api.github.com/search/code?q=%s&page=%d", QUERY, PAGE);
-            HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-            connection.setRequestMethod("GET");
-            connection.setRequestProperty("Authorization", "token " + TOKEN);
-            connection.setRequestProperty("Accept", "application/vnd.github.v3+json");
+        String query = "abc"; // 替换为你的搜索关键字
+        String org = "your_org"; // 替换为你的组织名称
+        int page = 1; // 从第一页开始
 
-            BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-            String inputLine;
-            StringBuilder content = new StringBuilder();
-            while ((inputLine = in.readLine()) != null) {
-                content.append(inputLine);
+        boolean hasNextPage = true;
+
+        while (hasNextPage) {
+            String url = String.format("%s?q=%s+org:%s&type=repositories&p=%d", GITHUB_SEARCH_URL, query, org, page);
+
+            try {
+                Document doc = Jsoup.connect(url).get();
+                hasNextPage = parseResults(doc);
+                page++;
+            } catch (IOException e) {
+                e.printStackTrace();
+                break;
             }
-
-            in.close();
-            connection.disconnect();
-
-            JSONObject jsonResponse = new JSONObject(content.toString());
-            JSONArray items = jsonResponse.getJSONArray("items");
-
-            for (int i = 0; i < items.length(); i++) {
-                JSONObject item = items.getJSONObject(i);
-                String fileName = item.getString("name");
-                String repoName = item.getJSONObject("repository").getString("full_name");
-                System.out.printf("File: %s, Repository: %s%n", fileName, repoName);
-            }
-
-        } catch (Exception e) {
-            e.printStackTrace();
         }
+    }
+
+    private static boolean parseResults(Document doc) {
+        Elements results = doc.select("div.f4.text-normal a");
+        if (results.isEmpty()) {
+            return false;
+        }
+
+        for (Element result : results) {
+            String repoLink = result.attr("href");
+            String repoName = result.text();
+            System.out.printf("Repository: %s, URL: %s%n", repoName, "https://github.com" + repoLink);
+        }
+
+        // 检查是否存在下一页
+        Elements nextPageLinks = doc.select("a.next_page");
+        return !nextPageLinks.isEmpty();
     }
 }
