@@ -49,6 +49,7 @@ public class GitHubCodeSearch {
                     while (!success && tokenIndex < TOKENS.size()) {
                         String token = TOKENS.get(tokenIndex);
                         String url = String.format("https://api.github.com/search/code?q=%s&page=%d", query, page);
+                        System.out.println("Request URL: " + url);  // 打印请求URL
                         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
                         connection.setRequestMethod("GET");
                         connection.setRequestProperty("Authorization", "token " + token);
