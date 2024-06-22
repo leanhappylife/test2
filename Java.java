@@ -1,50 +1,45 @@
-package com.example;
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
 
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
+    <groupId>com.example</groupId>
+    <artifactId>GitHubSearchAnalyzer</artifactId>
+    <version>1.0-SNAPSHOT</version>
 
-import java.io.IOException;
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+    </properties>
 
-public class GitHubRepoScraper {
-    private static final String GITHUB_SEARCH_URL = "https://github.com/search";
+    <dependencies>
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.13.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+            <version>4.5.13</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpmime</artifactId>
+            <version>4.5.13</version>
+        </dependency>
+    </dependencies>
 
-    public static void main(String[] args) {
-        String query = "abc"; // 替换为你的搜索关键字
-        String org = "your_org"; // 替换为你的组织名称
-        int page = 1; // 从第一页开始
-
-        boolean hasNextPage = true;
-
-        while (hasNextPage) {
-            String url = String.format("%s?q=%s+org:%s&type=repositories&p=%d", GITHUB_SEARCH_URL, query, org, page);
-
-            try {
-                Document doc = Jsoup.connect(url).get();
-                hasNextPage = parseResults(doc);
-                page++;
-            } catch (IOException e) {
-                e.printStackTrace();
-                break;
-            }
-        }
-    }
-
-    private static boolean parseResults(Document doc) {
-        Elements results = doc.select("div.f4.text-normal a");
-        if (results.isEmpty()) {
-            return false;
-        }
-
-        for (Element result : results) {
-            String repoLink = result.attr("href");
-            String repoName = result.text();
-            System.out.printf("Repository: %s, URL: %s%n", repoName, "https://github.com" + repoLink);
-        }
-
-        // 检查是否存在下一页
-        Elements nextPageLinks = doc.select("a.next_page");
-        return !nextPageLinks.isEmpty();
-    }
-}
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.0.0</version>
+                <configuration>
+                    <mainClass>com.example.GitHubSearchAnalyzer</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
