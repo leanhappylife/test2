@@ -1,173 +1,275 @@
-import java.io.BufferedReader;
-import java.io.FileOutputStream;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.util.Arrays;
-import java.util.List;
-import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import org.json.JSONArray;
-import org.json.JSONObject;
+使用 JSON 字符串并在客户端解析的方案确实可以解决 Jackson 版本冲突的问题，因为 JSON 字符串的传输不依赖于 Jackson 库的版本。下面是完整的解决方案，以确保在 Service A 和 Service B 中 Jackson 库的版本不同，但可以通过 JSON 字符串传输和解析来避免冲突。
 
-public class GitHubCodeSearch {
+Service A
+Step 1: 定义 StrategyMenuResult 类
+service-a/src/main/java/com/example/servicea/model/StrategyMenuResult.java
 
-    private static final List<String> TOKENS = Arrays.asList(
-        "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN_1",
-        "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN_2",
-        "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN_3"
-    );
+java
+复制代码
+package com.example.servicea.model;
 
-    private static final List<String> EXCLUDED_EXTENSIONS = Arrays.asList(".md", ".txt");
-    private static final List<String> EXCLUDED_REPO_KEYWORDS = Arrays.asList("test", "example");
+import java.io.Serializable;
 
-    public static void main(String[] args) {
-        String searchKeyword = "abc";
-        String organization = "openai";
-        String query = generateQuery(searchKeyword, organization);
-        int page = 1;
-        boolean hasMoreResults = true;
-        int tokenIndex = 0;
-        int retryCount = 0;
-        final int maxRetries = 2;
+public class StrategyMenuResult implements Serializable {
+    private String applicationId;
+    private String menuId;
+    private String description;
+    private String target;
+    private String remark;
 
-        Workbook workbook = new XSSFWorkbook();
-        Sheet sheet = workbook.createSheet("GitHub Search Results");
-        Row headerRow = sheet.createRow(0);
-        headerRow.createCell(0).setCellValue("File Name");
-        headerRow.createCell(1).setCellValue("Repository Name");
-        headerRow.createCell(2).setCellValue("Code Snippet");
-        headerRow.createCell(3).setCellValue("Search Keyword");
-        headerRow.createCell(4).setCellValue("File Type");
+    // 无参构造函数
+    public StrategyMenuResult() {}
 
-        int rowNum = 1;
-
-        try {
-            while (hasMoreResults || retryCount < maxRetries) {
-                try {
-                    boolean success = false;
-                    while (!success && tokenIndex < TOKENS.size()) {
-                        String token = TOKENS.get(tokenIndex);
-                        String url = String.format("https://api.github.com/search/code?q=%s&page=%d", query, page);
-                        System.out.println("Request URL: " + url);  // 打印请求URL
-                        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-                        connection.setRequestMethod("GET");
-                        connection.setRequestProperty("Authorization", "token " + token);
-                        connection.setRequestProperty("Accept", "application/vnd.github.v3.text-match+json");
-
-                        int responseCode = connection.getResponseCode();
-                        if (responseCode == 403) {
-                            // Rate limit hit, switch token
-                            tokenIndex = (tokenIndex + 1) % TOKENS.size();
-                            if (tokenIndex == 0) {
-                                // All tokens exhausted, wait before retrying
-                                System.out.println("Rate limit hit for all tokens. Waiting before retrying...");
-                                Thread.sleep(60000); // Wait for 1 minute
-                            }
-                        } else if (responseCode == 200) {
-                            success = true;
-                            BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-                            String inputLine;
-                            StringBuilder content = new StringBuilder();
-                            while ((inputLine = in.readLine()) != null) {
-                                content.append(inputLine);
-                            }
-
-                            in.close();
-                            connection.disconnect();
-
-                            JSONObject jsonResponse = new JSONObject(content.toString());
-                            JSONArray items = jsonResponse.getJSONArray("items");
-
-                            if (items.length() == 0) {
-                                if (retryCount < maxRetries) {
-                                    retryCount++;
-                                    System.out.printf("No results found, retrying %d/%d%n", retryCount, maxRetries);
-                                } else {
-                                    hasMoreResults = false;
-                                }
-                            } else {
-                                retryCount = 0; // reset retry count if results are found
-                                for (int i = 0; i < items.length(); i++) {
-                                    JSONObject item = items.getJSONObject(i);
-                                    String fileName = item.getString("name");
-                                    String repoName = item.getJSONObject("repository").getString("full_name");
-                                    String fileType = getFileExtension(fileName);
-
-                                    if (isValidFile(fileName) && !containsExcludedRepoKeyword(repoName)) {
-                                        Row row = sheet.createRow(rowNum++);
-                                        row.createCell(0).setCellValue(fileName);
-                                        row.createCell(1).setCellValue(repoName);
-
-                                        JSONArray textMatches = item.getJSONArray("text_matches");
-                                        StringBuilder snippets = new StringBuilder();
-                                        for (int j = 0; j < textMatches.length(); j++) {
-                                            JSONObject textMatch = textMatches.getJSONObject(j);
-                                            String fragment = textMatch.getString("fragment");
-                                            snippets.append(fragment).append("\n");
-                                        }
-                                        row.createCell(2).setCellValue(snippets.toString());
-                                        row.createCell(3).setCellValue(searchKeyword);
-                                        row.createCell(4).setCellValue(fileType);
-                                    }
-                                }
-                                page++;
-                            }
-                        } else {
-                            hasMoreResults = false;
-                            System.out.printf("Unexpected response code: %d%n", responseCode);
-                        }
-                        
-                        // 延迟每个请求，减少请求频率
-                        Thread.sleep(2000); // 等待2秒
-                    }
-
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    if (++retryCount >= maxRetries) {
-                        hasMoreResults = false;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            // Write the output to a file
-            try (FileOutputStream fileOut = new FileOutputStream("GitHubSearchResults.xlsx")) {
-                workbook.write(fileOut);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
+    public StrategyMenuResult(String applicationId, String menuId, String description, String target, String remark) {
+        this.applicationId = applicationId;
+        this.menuId = menuId;
+        this.description = description;
+        this.target = target;
+        this.remark = remark;
     }
 
-    private static String generateQuery(String keyword, String organization) {
-        return String.format("%s+org:%s+is:public+archived:false", keyword, organization);
+    // Getters 和 Setters
+    public String getApplicationId() {
+        return applicationId;
     }
 
-    private static boolean isValidFile(String fileName) {
-        for (String extension : EXCLUDED_EXTENSIONS) {
-            if (fileName.endsWith(extension)) {
-                return false;
-            }
-        }
-        return true;
+    public void setApplicationId(String applicationId) {
+        this.applicationId = applicationId;
     }
 
-    private static boolean containsExcludedRepoKeyword(String repoName) {
-        for (String keyword : EXCLUDED_REPO_KEYWORDS) {
-            if (repoName.toLowerCase().contains(keyword.toLowerCase())) {
-                return true;
-            }
-        }
-        return false;
+    public String getMenuId() {
+        return menuId;
     }
 
-    private static String getFileExtension(String fileName) {
-        int dotIndex = fileName.lastIndexOf('.');
-        if (dotIndex >= 0) {
-            return fileName.substring(dotIndex + 1);
-        }
-        return "";
+    public void setMenuId(String menuId) {
+        this.menuId = menuId;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public String getTarget() {
+        return target;
+    }
+
+    public void setTarget(String target) {
+        this.target = target;
+    }
+
+    public String getRemark() {
+        return remark;
+    }
+
+    public void setRemark(String remark) {
+        this.remark = remark;
     }
 }
+Step 2: 服务端控制器
+service-a/src/main/java/com/example/servicea/controller/MenuController.java
+
+java
+复制代码
+package com.example.servicea.controller;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import com.example.servicea.model.StrategyMenuResult;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.ArrayList;
+import java.util.List;
+
+@RestController
+@RequestMapping("/api")
+public class MenuController {
+
+    @GetMapping("/menus")
+    public ResponseEntity<String> getMenuResults() throws JsonProcessingException {
+        List<StrategyMenuResult> menuList = new ArrayList<>();
+        menuList.add(new StrategyMenuResult("app1", "menu1", "Description 1", "target1", "remark1"));
+        menuList.add(new StrategyMenuResult("app2", "menu2", "Description 2", "target2", "remark2"));
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        String json = objectMapper.writeValueAsString(menuList);
+
+        return ResponseEntity.ok(json); // 返回 JSON 字符串
+    }
+}
+service-a/pom.xml
+
+xml
+复制代码
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>2.3.0</version>
+    </dependency>
+</dependencies>
+Service A Client
+service-a-client/src/main/java/com/example/serviceaclient/model/StrategyMenuResult.java
+
+java
+复制代码
+package com.example.serviceaclient.model;
+
+import java.io.Serializable;
+
+public class StrategyMenuResult implements Serializable {
+    private String applicationId;
+    private String menuId;
+    private String description;
+    private String target;
+    private String remark;
+
+    // 无参构造函数
+    public StrategyMenuResult() {}
+
+    public StrategyMenuResult(String applicationId, String menuId, String description, String target, String remark) {
+        this.applicationId = applicationId;
+        this.menuId = menuId;
+        this.description = description;
+        this.target = target;
+        this.remark = remark;
+    }
+
+    // Getters 和 Setters
+    public String getApplicationId() {
+        return applicationId;
+    }
+
+    public void setApplicationId(String applicationId) {
+        this.applicationId = applicationId;
+    }
+
+    public String getMenuId() {
+        return menuId;
+    }
+
+    public void setMenuId(String menuId) {
+        this.menuId = menuId;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public String getTarget() {
+        return target;
+    }
+
+    public void setTarget(String target) {
+        this.target = target;
+    }
+
+    public String getRemark() {
+        return remark;
+    }
+
+    public void setRemark(String remark) {
+        this.remark = remark;
+    }
+}
+service-a-client/src/main/java/com/example/serviceaclient/client/MenuClient.java
+
+java
+复制代码
+package com.example.serviceaclient.client;
+
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.GetMapping;
+
+@FeignClient(name = "menuClient", url = "http://localhost:8080")
+public interface MenuClient {
+
+    @GetMapping("/api/menus")
+    String getMenuResults(); // 返回字符串
+}
+service-a-client/pom.xml
+
+xml
+复制代码
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-starter-openfeign</artifactId>
+    </dependency>
+</dependencies>
+Service B
+在 Service B 中引入 Service A Client 的依赖
+service-b/pom.xml
+
+xml
+复制代码
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-starter-openfeign</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>2.1.0</version>
+    </dependency>
+    <dependency>
+        <groupId>com.example</groupId>
+        <artifactId>service-a-client</artifactId>
+        <version>1.0.0</version>
+    </dependency>
+</dependencies>
+使用 Jackson 进行解析
+service-b/src/main/java/com/example/serviceb/FeignClientRunner.java
+
+java
+复制代码
+package com.example.serviceb;
+
+import com.example.serviceaclient.client.MenuClient;
+import com.example.serviceaclient.model.StrategyMenuResult;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+public class FeignClientRunner implements CommandLineRunner {
+
+    @Autowired
+    private MenuClient menuClient;
+
+    @Override
+    public void run(String... args) throws Exception {
+        String jsonResponse = menuClient.getMenuResults();
+        System.out.println("Response JSON: " + jsonResponse);
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        List<StrategyMenuResult> resultList = objectMapper.readValue(jsonResponse, new TypeReference<List<StrategyMenuResult>>() {});
+
+        resultList.forEach(System.out::println);
+    }
+}
+总结
+通过在 Service A 中返回 JSON 字符串，并在 Service B 中使用 Jackson 进行解析，可以有效解决 Jackson 版本冲突的问题。JSON 字符串的传输独立于 Jackson 版本，不会引起版本不兼容问题。这样可以确保数据传输的可靠性和一致性，同时利用 Jackson 进行高效的 JSON 解析。
