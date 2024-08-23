@@ -32,3 +32,5 @@ public class SFTPTest {
         <version>0.1.55</version> <!-- 确保使用最新版本 -->
     </dependency>
 </dependencies>
+
+    ssh-keygen -p -m PEM -f D:/ssh/id_rsa
