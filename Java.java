@@ -1,36 +1,15 @@
-import com.jcraft.jsch.ChannelSftp;
-import com.jcraft.jsch.JSch;
-import com.jcraft.jsch.Session;
+for (int var6 = 0; var6 < var5; ++var6) {
+    String fileName = var4[var6];
+    fileName = fileName.replace("\\", "/");
 
-public class SFTPTest {
-    public static void main(String[] args) {
-        try {
-            JSch jsch = new JSch();
-            jsch.addIdentity("C:\\Work\\ssh\\id_rsa"); // 确保路径正确
-            Session session = jsch.getSession("username", "hostname", 22);
-            session.setConfig("StrictHostKeyChecking", "no");
-            session.connect();
-            
-            ChannelSftp sftpChannel = (ChannelSftp) session.openChannel("sftp");
-            sftpChannel.connect();
-            
-            System.out.println("Connected successfully to the server.");
-            
-            sftpChannel.disconnect();
-            session.disconnect();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+    // 使用 BufferedInputStream 包装 FileInputStream 以提高性能
+    try (InputStream inputStream = new BufferedInputStream(new FileInputStream(fileName))) {
+        sftp.put(inputStream, fileName.substring(fileName.lastIndexOf('/') + 1));
+    } catch (IOException e) {
+        // 处理 FileInputStream 的 IO 异常
+        e.printStackTrace();
+    } catch (SftpException e) {
+        // 处理 SFTP 异常
+        e.printStackTrace();
     }
 }
-
-
-<dependencies>
-    <dependency>
-        <groupId>com.jcraft</groupId>
-        <artifactId>jsch</artifactId>
-        <version>0.1.55</version> <!-- 确保使用最新版本 -->
-    </dependency>
-</dependencies>
-
-    ssh-keygen -p -m PEM -f D:/ssh/id_rsa
