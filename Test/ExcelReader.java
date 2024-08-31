@@ -1,3 +1,12 @@
+@Repository
+public interface MyEntityWithEmbeddedIdRepository extends JpaRepository<MyEntityWithEmbeddedId, MyCompositeKey> {
+
+    @Query("SELECT e FROM MyEntityWithEmbeddedId e")
+    @QueryHints(value = {@QueryHint(name = "org.hibernate.cacheable", value = "false")})
+    Stream<MyEntityWithEmbeddedId> streamAllEntities();
+}
+
+
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 import org.springframework.beans.factory.annotation.Autowired;
