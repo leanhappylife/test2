@@ -1,4 +1,54 @@
 =====================
+
+    @Transactional(readOnly = true)
+public <T, ID> void exportDataToCsv(JpaRepository<T, ID> repository, String fileName, String[] headers, Function<T, List<Object>> dataMapper) {
+    int pageSize = 300; // 每页的记录数量更小，减少内存占用
+    int pageNumber = 0; // 初始页码
+    final int flushThreshold = 1000; // 每1000条记录刷新一次
+    final int[] recordCount = {0};  // 记录已写入的记录数量
+
+    try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, false), 1024 * 1024);
+         CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
+
+        while (true) {
+            // 使用局部变量块限制对象的生命周期
+            {
+                Pageable pageable = PageRequest.of(pageNumber, pageSize);
+                Page<T> page = repository.findAll(pageable);
+
+                List<T> entities = new ArrayList<>(page.getContent());
+                if (entities.isEmpty()) {
+                    break; // 没有更多数据时退出循环
+                }
+
+                for (int i = 0; i < entities.size(); i++) {
+                    T entity = entities.get(i);
+                    csvPrinter.printRecord(dataMapper.apply(entity));
+                    recordCount[0]++;
+
+                    if (recordCount[0] % flushThreshold == 0) {
+                        csvPrinter.flush();
+                    }
+                    entities.set(i, null); // 清理引用
+                }
+
+                entityManager.clear(); // 清理 Hibernate 的一级缓存
+                // 释放局部变量范围内的对象
+            }
+
+            pageNumber++; // 读取下一页数据
+        }
+
+        csvPrinter.flush(); // 确保最后一批数据被写入
+        System.out.println("CSV file created successfully: " + fileName);
+
+    } catch (IOException e) {
+        e.printStackTrace();
+    }
+}
+
+
+
     import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 import org.springframework.beans.factory.annotation.Autowired;
