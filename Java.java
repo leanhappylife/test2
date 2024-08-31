@@ -1,3 +1,9 @@
+<dependency>
+    <groupId>org.apache.commons</groupId>
+    <artifactId>commons-csv</artifactId>
+    <version>1.10.0</version> <!-- 使用最新的稳定版本 -->
+</dependency>
+    
 为了将上述代码变成一个通用的方法（common method），我们需要创建一个独立的工具类（utility class），其中包含一个可以接受不同参数的通用方法来处理CSV写入。这个方法应该可以灵活地处理不同的数据类型，而不仅仅限于特定的实体类。
 
 通用方法设计
