@@ -1,182 +1,278 @@
-是的，在Spring Boot中可以有多个实现了CommandLineRunner或ApplicationRunner接口的类。Spring Boot会在应用程序启动时调用所有这些实现的run方法。你可以使用这些类来执行各种启动后的初始化任务。
+以下是修改后的所有可执行的代码，针对可能的内存问题进行了优化，确保在处理大数据量时（例如百万条记录）更高效并减少内存占用。
 
-如果你有多个CommandLineRunner或ApplicationRunner实现，Spring Boot将按照它们在Spring应用上下文中的定义顺序调用它们。你也可以使用@Order注解或实现Ordered接口来指定调用顺序。
+1. 实体类 MyEntityWithEmbeddedId
+首先，定义一个使用 @EmbeddedId 作为复合主键的实体类。
 
-示例：多个CommandLineRunner类
-下面是一个完整的示例，展示如何定义和使用多个CommandLineRunner实现。
-
-项目结构
-css
-复制代码
-spring-boot-multiple-commandlinerunner
-├── src
-│   └── main
-│       ├── java
-│       │   └── com
-│       │       └── example
-│       │           └── demo
-│       │               ├── DemoApplication.java
-│       │               ├── runner
-│       │               │   ├── FirstStartupRunner.java
-│       │               │   └── SecondStartupRunner.java
-│       │               └── controller
-│       │                   └── HelloController.java
-│       └── resources
-│           └── application.properties
-├── mvnw
-├── mvnw.cmd
-├── pom.xml
-└── README.md
-1. 主应用程序类 DemoApplication.java
+复合主键类 MyCompositeKey
 java
 复制代码
-package com.example.demo;
+import javax.persistence.Embeddable;
+import java.io.Serializable;
 
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
+@Embeddable
+public class MyCompositeKey implements Serializable {
+    private Long idPart1;
+    private String idPart2;
 
-@SpringBootApplication
-public class DemoApplication {
-
-    public static void main(String[] args) {
-        SpringApplication.run(DemoApplication.class, args);
+    // 构造器、Getter 和 Setter 方法
+    public MyCompositeKey() {
     }
-}
-2. 第一个 CommandLineRunner 实现 FirstStartupRunner.java
-java
-复制代码
-package com.example.demo.runner;
 
-import org.springframework.boot.CommandLineRunner;
-import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Component;
+    public MyCompositeKey(Long idPart1, String idPart2) {
+        this.idPart1 = idPart1;
+        this.idPart2 = idPart2;
+    }
 
-@Component
-@Order(1)
-public class FirstStartupRunner implements CommandLineRunner {
+    public Long getIdPart1() {
+        return idPart1;
+    }
+
+    public void setIdPart1(Long idPart1) {
+        this.idPart1 = idPart1;
+    }
+
+    public String getIdPart2() {
+        return idPart2;
+    }
+
+    public void setIdPart2(String idPart2) {
+        this.idPart2 = idPart2;
+    }
+
+    // 重写 equals 和 hashCode 方法
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        MyCompositeKey that = (MyCompositeKey) o;
+
+        if (!idPart1.equals(that.idPart1)) return false;
+        return idPart2.equals(that.idPart2);
+    }
 
     @Override
-    public void run(String... args) throws Exception {
-        System.out.println("FirstStartupRunner is called.");
-        // 这里可以执行你的初始化逻辑
+    public int hashCode() {
+        int result = idPart1.hashCode();
+        result = 31 * result + idPart2.hashCode();
+        return result;
     }
 }
-3. 第二个 CommandLineRunner 实现 SecondStartupRunner.java
+实体类 MyEntityWithEmbeddedId
 java
 复制代码
-package com.example.demo.runner;
+import javax.persistence.EmbeddedId;
+import javax.persistence.Entity;
 
-import org.springframework.boot.CommandLineRunner;
-import org.springframework.core.annotation.Order;
+@Entity
+public class MyEntityWithEmbeddedId {
+    @EmbeddedId
+    private MyCompositeKey id; // 嵌入式复合主键
+    private String name;
+    private String email;
+    private String country;
+
+    // Getters and Setters
+    public MyCompositeKey getId() {
+        return id;
+    }
+
+    public void setId(MyCompositeKey id) {
+        this.id = id;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
+    public String getCountry() {
+        return country;
+    }
+
+    public void setCountry(String country) {
+        this.country = country;
+    }
+}
+2. 仓库接口 MyEntityWithEmbeddedIdRepository
+定义支持分页查询的仓库接口：
+
+java
+复制代码
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface MyEntityWithEmbeddedIdRepository extends JpaRepository<MyEntityWithEmbeddedId, MyCompositeKey> {
+}
+3. 通用 CSV 导出工具类 CsvExportUtil
+优化后的 CsvExportUtil 类，增加了对大数据量处理的内存管理：
+
+java
+复制代码
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVPrinter;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.List;
+import java.util.function.Function;
 
 @Component
-@Order(2)
-public class SecondStartupRunner implements CommandLineRunner {
+public class CsvExportUtil {
 
-    @Override
-    public void run(String... args) throws Exception {
-        System.out.println("SecondStartupRunner is called.");
-        // 这里可以执行你的初始化逻辑
+    /**
+     * 通用的CSV导出方法
+     *
+     * @param repository  JPA 仓库，支持分页查询
+     * @param fileName    输出的CSV文件名
+     * @param headers     CSV文件的列标题
+     * @param dataMapper  数据转换函数，用于将实体类数据转换为CSV写入格式
+     * @param <T>         实体类型
+     * @param <ID>        主键类型
+     */
+    @Transactional(readOnly = true)
+    public <T, ID> void exportDataToCsv(JpaRepository<T, ID> repository, String fileName, String[] headers, Function<T, List<Object>> dataMapper) {
+        int pageSize = 300; // 每页的记录数量更小，减少内存占用
+        int pageNumber = 0; // 初始页码
+        final int flushThreshold = 1000; // 每1000条记录刷新一次
+        final int[] recordCount = {0};  // 记录已写入的记录数量
+
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, false), 1024 * 1024);
+             CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
+
+            // 循环分页读取数据，直到没有更多数据
+            while (true) {
+                Pageable pageable = PageRequest.of(pageNumber, pageSize);
+                Page<T> page = repository.findAll(pageable);
+                List<T> entities = page.getContent();
+
+                if (entities.isEmpty()) {
+                    break; // 没有更多数据时退出循环
+                }
+
+                // 将每一页的数据写入 CSV 文件
+                for (T entity : entities) {
+                    csvPrinter.printRecord(dataMapper.apply(entity));
+                    recordCount[0]++;
+
+                    // 达到阈值时刷新
+                    if (recordCount[0] % flushThreshold == 0) {
+                        csvPrinter.flush();
+                    }
+                }
+
+                entities.clear(); // 清空当前批次的数据
+                pageNumber++; // 读取下一页数据
+            }
+
+            csvPrinter.flush(); // 确保最后一批数据被写入
+            System.out.println("CSV file created successfully: " + fileName);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 }
-4. 控制器类 HelloController.java
+4. 服务类 CsvWriterEmbeddedIdService
+使用通用的 CSV 导出工具类导出带有 @EmbeddedId 主键的实体数据：
+
 java
 复制代码
-package com.example.demo.controller;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 
+import java.util.Arrays;
+import java.util.List;
+
+@Service
+public class CsvWriterEmbeddedIdService {
+
+    @Autowired
+    private MyEntityWithEmbeddedIdRepository myEntityWithEmbeddedIdRepository;
+
+    @Autowired
+    private CsvExportUtil csvExportUtil;
+
+    public void exportDataToCsv(String fileName) {
+        String[] headers = {"ID Part 1", "ID Part 2", "Name", "Email", "Country"};
+
+        csvExportUtil.exportDataToCsv(
+                myEntityWithEmbeddedIdRepository, // 传入特定的Repository
+                fileName,
+                headers,
+                // 数据转换函数，将 MyEntityWithEmbeddedId 对象转换为 CSV 行
+                entity -> Arrays.asList(
+                        entity.getId().getIdPart1(),    // 获取嵌入式主键的部分1
+                        entity.getId().getIdPart2(),    // 获取嵌入式主键的部分2
+                        entity.getName(),
+                        entity.getEmail(),
+                        entity.getCountry()
+                )
+        );
+    }
+}
+5. 控制器类 MyEntityController
+定义一个控制器来触发 CSV 导出操作：
+
+java
+复制代码
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-public class HelloController {
+public class MyEntityController {
 
-    @GetMapping("/hello")
-    public String hello() {
-        return "Hello, World!";
+    @Autowired
+    private CsvWriterEmbeddedIdService csvWriterEmbeddedIdService;
+
+    @GetMapping("/export")
+    public String exportData() {
+        csvWriterEmbeddedIdService.exportDataToCsv("output.csv");
+        return "Data export started.";
     }
 }
-5. 配置文件 application.properties
-properties
-复制代码
-# src/main/resources/application.properties
-# 这里可以配置Spring Boot的属性
-6. Maven 配置文件 pom.xml
-确保你有一个有效的 pom.xml，包括 Spring Boot Starter 依赖：
+6. Maven 依赖
+确保在 pom.xml 中添加 Apache Commons CSV 的依赖：
 
 xml
 复制代码
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
-    <groupId>com.example</groupId>
-    <artifactId>spring-boot-multiple-commandlinerunner</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
-    <packaging>jar</packaging>
-    <name>spring-boot-multiple-commandlinerunner</name>
-    <description>Demo project for Spring Boot</description>
+<dependency>
+    <groupId>org.apache.commons</groupId>
+    <artifactId>commons-csv</artifactId>
+    <version>1.10.0</version> <!-- 使用最新的稳定版本 -->
+</dependency>
+关键优化点
+分页查询：
 
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>2.7.5</version>
-        <relativePath/> <!-- lookup parent from repository -->
-    </parent>
+每次分页查询的数量减少到 300 条，以减少内存占用。
+批量刷新：
 
-    <properties>
-        <java.version>11</java.version>
-    </properties>
+每 1000 条记录刷新一次，减少频繁 I/O 操作对性能的影响。
+及时清理数据：
 
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
+处理完每一页数据后，清空集合 entities.clear()，释放内存。
+调整 JVM 内存配置：
 
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-            </plugin>
-        </plugins>
-    </build>
-
-</project>
-运行应用程序
-打开终端，导航到项目目录。
-运行以下命令启动应用程序：
-sh
-复制代码
-./mvnw spring-boot:run
-测试
-启动应用程序后，你应该会在控制台上看到以下输出，表示两个 CommandLineRunner 实现类的 run 方法被依次调用：
-
-sh
-复制代码
-FirstStartupRunner is called.
-SecondStartupRunner is called.
-同时，你可以访问 http://localhost:8080/hello，应该会看到以下响应：
-
-复制代码
-Hello, World!
+配置 JVM 堆内存，以提供足够的内存空间进行大数据处理。
 总结
-你可以在Spring Boot中定义多个实现了CommandLineRunner或ApplicationRunner接口的类，并使用@Order注解来指定它们的执行顺序。在应用启动完成后，Spring Boot将按照定义的顺序依次调用它们的run方法。
-
-
-
-
-
-
-
-
-
-
+通过这些优化措施，修改后的代码能够更高效地处理大数据量的导出操作，减少内存使用，防止内存溢出，并确保程序在有限的内存环境中稳定运行
