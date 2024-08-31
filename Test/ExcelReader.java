@@ -1,3 +1,81 @@
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVPrinter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import javax.persistence.EntityManager;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.List;
+import java.util.function.Function;
+
+@Component
+public class CsvExportUtil {
+
+    @Autowired
+    private EntityManager entityManager; // 注入 EntityManager 用于清理缓存
+
+    /**
+     * 通用的CSV导出方法
+     *
+     * @param repository  JPA 仓库，支持分页查询
+     * @param fileName    输出的CSV文件名
+     * @param headers     CSV文件的列标题
+     * @param dataMapper  数据转换函数，用于将实体类数据转换为CSV写入格式
+     * @param <T>         实体类型
+     * @param <ID>        主键类型
+     */
+    @Transactional(readOnly = true)
+    public <T, ID> void exportDataToCsv(JpaRepository<T, ID> repository, String fileName, String[] headers, Function<T, List<Object>> dataMapper) {
+        int pageSize = 300; // 每页的记录数量更小，减少内存占用
+        int pageNumber = 0; // 初始页码
+        final int flushThreshold = 1000; // 每1000条记录刷新一次
+        final int[] recordCount = {0};  // 记录已写入的记录数量
+
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, false), 1024 * 1024);
+             CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
+
+            // 循环分页读取数据，直到没有更多数据
+            while (true) {
+                Pageable pageable = PageRequest.of(pageNumber, pageSize);
+                Page<T> page = repository.findAll(pageable);
+                List<T> entities = page.getContent();
+
+                if (entities.isEmpty()) {
+                    break; // 没有更多数据时退出循环
+                }
+
+                // 将每一页的数据写入 CSV 文件
+                for (T entity : entities) {
+                    csvPrinter.printRecord(dataMapper.apply(entity));
+                    recordCount[0]++;
+
+                    // 达到阈值时刷新
+                    if (recordCount[0] % flushThreshold == 0) {
+                        csvPrinter.flush();
+                    }
+                }
+
+                entities.clear(); // 清空当前批次的数据
+                entityManager.clear(); // 清理 Hibernate 的一级缓存
+                pageNumber++; // 读取下一页数据
+            }
+
+            csvPrinter.flush(); // 确保最后一批数据被写入
+            System.out.println("CSV file created successfully: " + fileName);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
 以下是修改后的所有可执行的代码，针对可能的内存问题进行了优化，确保在处理大数据量时（例如百万条记录）更高效并减少内存占用。
 
 1. 实体类 MyEntityWithEmbeddedId
