@@ -1,3 +1,80 @@
+=====================
+    import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVPrinter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import javax.persistence.EntityManager;
+import javax.persistence.PersistenceContext;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Function;
+
+@Component
+public class CsvExportUtil {
+
+    @PersistenceContext  // 注入 EntityManager 用于清理缓存
+    private EntityManager entityManager;
+
+    @Transactional(readOnly = true)
+    public <T, ID> void exportDataToCsv(JpaRepository<T, ID> repository, String fileName, String[] headers, Function<T, List<Object>> dataMapper) {
+        int pageSize = 300; // 每页的记录数量更小，减少内存占用
+        int pageNumber = 0; // 初始页码
+        final int flushThreshold = 1000; // 每1000条记录刷新一次
+        final int[] recordCount = {0};  // 记录已写入的记录数量
+
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, false), 1024 * 1024);
+             CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
+
+            while (true) {
+                Pageable pageable = PageRequest.of(pageNumber, pageSize);
+                Page<T> page = repository.findAll(pageable);
+
+                // 将结果转换为可修改的集合
+                List<T> entities = new ArrayList<>(page.getContent());
+
+                if (entities.isEmpty()) {
+                    break; // 没有更多数据时退出循环
+                }
+
+                // 将每一页的数据写入 CSV 文件
+                for (T entity : entities) {
+                    csvPrinter.printRecord(dataMapper.apply(entity));
+                    recordCount[0]++;
+
+                    // 达到阈值时刷新
+                    if (recordCount[0] % flushThreshold == 0) {
+                        csvPrinter.flush();
+                    }
+                }
+
+                entities.clear(); // 清空当前批次的数据
+                entityManager.clear(); // 清理 Hibernate 的一级缓存
+                pageNumber++; // 读取下一页数据
+            }
+
+            csvPrinter.flush(); // 确保最后一批数据被写入
+            System.out.println("CSV file created successfully: " + fileName);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+    ========================
+
+
+
+
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 import org.springframework.beans.factory.annotation.Autowired;
