@@ -1,6 +1,55 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.List;
+
+@Service
+public class MyEntityService {
+
+    @Autowired
+    private MyEntityRepository myEntityRepository;
+
+    public void exportDataToCsv(String fileName) {
+        int pageSize = 1000; // 每次读取1000条记录
+        int pageNumber = 0;
+
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName))) {
+            // 写CSV头部
+            writer.write("id,name,otherField");
+            writer.newLine();
+
+            while (true) {
+                // 分页查询
+                Page<MyEntity> page = myEntityRepository.findAll(PageRequest.of(pageNumber, pageSize));
+                List<MyEntity> entities = page.getContent();
+
+                // 如果没有更多数据，跳出循环
+                if (entities.isEmpty()) {
+                    break;
+                }
+
+                // 写入CSV
+                for (MyEntity entity : entities) {
+                    writer.write(entity.getId() + "," + entity.getName() + "," + entity.getOtherField());
+                    writer.newLine();
+                }
+
+                // 下一页
+                pageNumber++;
+            }
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.example</groupId>
