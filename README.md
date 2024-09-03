@@ -1,10 +1,60 @@
-import java.io.BufferedReader;
+i java.io.BufferedReader;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.Arrays;
-import java.util.List;
+import java.util.
+
+
+@Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+private <T, ID> void exportDataToCsv(JpaRepository<T, ID> repository, String fileName, String[] headers, Function<T, List<Object>> dataMapper) {
+    int pageSize = 300;
+    int pageNumber = 0;
+    final int flushThreshold = 1000;
+    final int[] recordCount = {0};
+
+    try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, false), 1024 * 1024);
+         CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
+
+        while (true) {
+            Pageable pageable = PageRequest.of(pageNumber, pageSize);
+            Page<T> page = repository.findAll(pageable);
+
+            List<T> entities = new ArrayList<>(page.getContent());
+            if (entities.isEmpty()) {
+                break;
+            }
+
+            for (int i = 0; i < entities.size(); i++) {
+                T entity = entities.get(i);
+                csvPrinter.printRecord(dataMapper.apply(entity));
+                recordCount[0]++;
+
+                if (recordCount[0] % flushThreshold == 0) {
+                    csvPrinter.flush();
+                }
+
+                // Detach the entity to release memory
+                entityManager.detach(entity);
+                entities.set(i, null); // Clear the local reference to help with garbage collection
+            }
+
+            // Clear the persistence context
+            entityManager.clear();
+
+            pageNumber++;
+        }
+
+        csvPrinter.flush();
+        logger.info("CSV file created successfully: {}", fileName);
+
+    } catch (IOException e) {
+        logger.error("IOException occurred while creating CSV file: {}", fileName, e);
+    } catch (Exception e) {
+        logger.error("An unexpected error occurred while creating CSV file: {}", fileName, e);
+    }
+}
+
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.json.JSONArray;
