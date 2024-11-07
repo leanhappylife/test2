@@ -1,229 +1,45 @@
-i java.io.BufferedReader;
-import java.io.FileOutputStream;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.util.
+Self-Assessment - Software Engineer 2024
 
+Achievements and Key Contributions
+Project Management and Execution
 
-@Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
-private <T, ID> void exportDataToCsv(JpaRepository<T, ID> repository, String fileName, String[] headers, Function<T, List<Object>> dataMapper) {
-    int pageSize = 300;
-    int pageNumber = 0;
-    final int flushThreshold = 1000;
-    final int[] recordCount = {0};
+Successfully led a project focused on updating holiday files, adding new watch files, and maintaining record logs. This involved collaboration with cross-functional teams to ensure smooth and timely execution, meeting all project deadlines with minimal errors.
+Connectivity and Integration Testing
 
-    try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, false), 1024 * 1024);
-         CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
+Conducted comprehensive SFTP connectivity tests between SG PBCCL and RMD, as well as between PBCCL and the AIP server. I ensured secure data transfers, optimized configurations, and resolved connectivity issues, which improved operational efficiency and reliability in data exchange processes.
+System Upgrades and Maintenance
 
-        while (true) {
-            Pageable pageable = PageRequest.of(pageNumber, pageSize);
-            Page<T> page = repository.findAll(pageable);
+Played a key role in ITSO tasks, including studying and upgrading the CDGateway to enhance system performance. This involved researching best practices, testing various configurations, and implementing improvements that contributed to a more resilient system.
+Performance Tuning and Optimization
 
-            List<T> entities = new ArrayList<>(page.getContent());
-            if (entities.isEmpty()) {
-                break;
-            }
+Engaged in PBCCL performance tuning tasks to identify bottlenecks and optimize the system’s performance. This effort led to measurable improvements in processing times and reduced latency, resulting in a more responsive and efficient platform.
+SA Moderation Project and Legacy Task Management
 
-            for (int i = 0; i < entities.size(); i++) {
-                T entity = entities.get(i);
-                csvPrinter.printRecord(dataMapper.apply(entity));
-                recordCount[0]++;
+In the SA Moderation project, successfully executed a planned shutdown of the ESA legacy WebSphere Application Server (WAS) over a structured four-day process. This required meticulous preparation of a clear runbook, involving multiple teams to ensure all dependencies and risks were managed. Through effective collaboration and communication, the shutdown was completed successfully, marking the decommissioning of this legacy service.
+Additionally, resolved memory issues in the CSV generation process, optimizing data handling and memory management, which reduced memory consumption and improved stability during large data exports.
+Implemented different scheduled jobs in the SA Moderation project to migrate old jobs to the new Sparter system, successfully coordinating the transition. This involved analyzing scheduling requirements, setting up various schedules, and ensuring all legacy jobs were seamlessly integrated into Sparter. The migration improved system efficiency and reduced the maintenance burden on legacy systems.
+SAM EFM F24 Testing
 
-                if (recordCount[0] % flushThreshold == 0) {
-                    csvPrinter.flush();
-                }
+Contributed to the SAM EFM F24 testing project by collaborating with multiple teams to address a critical MQ (Message Queue) configuration issue in the UAT (User Acceptance Testing) environment. This involved troubleshooting configuration settings, coordinating with stakeholders across different teams, and implementing adjustments that resolved connectivity issues. This effort ensured a smooth testing process and set a solid foundation for the system’s stability in production.
+Skill Development and Learning
+AWS
 
-                // Detach the entity to release memory
-                entityManager.detach(entity);
-                entities.set(i, null); // Clear the local reference to help with garbage collection
-            }
+Dedicated time to learning AWS, focusing on core services such as EC2, S3, and Lambda. Gained foundational knowledge in cloud infrastructure and deployment, which I applied to improve scalability and efficiency in several projects. Moving forward, I aim to deepen my knowledge of cloud-native application development.
+React
 
-            // Clear the persistence context
-            entityManager.clear();
+Enhanced my front-end development skills by learning React. I worked on small projects to familiarize myself with component-based architecture and state management, which improved my ability to build responsive and dynamic user interfaces. In future projects, I plan to integrate React into my development workflow more extensively.
+Spring Boot
 
-            pageNumber++;
-        }
+Studied Spring Boot to strengthen my backend development skills, particularly for building scalable microservices. I completed tutorials on creating RESTful APIs and integrated them with existing projects, which allowed me to enhance system modularity and maintainability.
+Goals for 2025
+Deepen Expertise in Cloud Computing (AWS)
+Continue to expand my knowledge of AWS, with a focus on advanced services and security best practices to further support cloud infrastructure initiatives within the team.
 
-        csvPrinter.flush();
-        logger.info("CSV file created successfully: {}", fileName);
+Advanced Front-End and Back-End Integration
+Work on projects that integrate React with Spring Boot to build full-stack applications, leveraging my skills to create end-to-end solutions that meet both business and user needs.
 
-    } catch (IOException e) {
-        logger.error("IOException occurred while creating CSV file: {}", fileName, e);
-    } catch (Exception e) {
-        logger.error("An unexpected error occurred while creating CSV file: {}", fileName, e);
-    }
-}
+Performance Optimization and System Reliability
+Apply learnings from past performance tuning tasks to proactively optimize new projects. Aim to implement monitoring and alerting systems to ensure high reliability and fast response times across all services.
 
-import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import org.json.JSONArray;
-import org.json.JSONObject;
-
-public class GitHubCodeSearch {
-
-    private static final List<String> TOKENS = Arrays.asList(
-        "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN_1"
-        // 你可以在这里添加更多令牌
-    );
-
-    private static final List<String> EXCLUDED_EXTENSIONS = Arrays.asList(".md", ".txt");
-    private static final List<String> EXCLUDED_REPO_KEYWORDS = Arrays.asList("test", "example");
-
-    public static void main(String[] args) {
-        String searchKeyword = "abc";
-        String organization = "openai";
-        String query = generateQuery(searchKeyword, organization);
-        int page = 1;
-        boolean hasMoreResults = true;
-        int tokenIndex = 0;
-        int retryCount = 0;
-        final int maxRetries = 2;
-
-        Workbook workbook = new XSSFWorkbook();
-        Sheet sheet = workbook.createSheet("GitHub Search Results");
-        Row headerRow = sheet.createRow(0);
-        headerRow.createCell(0).setCellValue("File Name");
-        headerRow.createCell(1).setCellValue("Repository Name");
-        headerRow.createCell(2).setCellValue("Code Snippet");
-        headerRow.createCell(3).setCellValue("Search Keyword");
-        headerRow.createCell(4).setCellValue("File Type");
-        headerRow.createCell(5).setCellValue("Visibility");
-        headerRow.createCell(6).setCellValue("File URL");
-
-        int rowNum = 1;
-
-        try {
-            while (hasMoreResults || retryCount < maxRetries) {
-                try {
-                    boolean success = false;
-                    while (!success && tokenIndex < TOKENS.size()) {
-                        String token = TOKENS.get(tokenIndex);
-                        String url = String.format("https://api.github.com/search/code?q=%s&page=%d", query, page);
-                        System.out.println("Request URL: " + url);  // 打印请求URL
-                        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-                        connection.setRequestMethod("GET");
-                        connection.setRequestProperty("Authorization", "token " + token);
-                        connection.setRequestProperty("Accept", "application/vnd.github.v3.text-match+json");
-
-                        int responseCode = connection.getResponseCode();
-                        if (responseCode == 403) {
-                            // Rate limit hit, switch token
-                            tokenIndex = (tokenIndex + 1) % TOKENS.size();
-                            if (tokenIndex == 0) {
-                                // All tokens exhausted, wait before retrying
-                                System.out.println("Rate limit hit for all tokens. Waiting before retrying...");
-                                Thread.sleep(60000); // Wait for 1 minute
-                            }
-                        } else if (responseCode == 200) {
-                            success = true;
-                            BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-                            String inputLine;
-                            StringBuilder content = new StringBuilder();
-                            while ((inputLine = in.readLine()) != null) {
-                                content.append(inputLine);
-                            }
-
-                            in.close();
-                            connection.disconnect();
-
-                            JSONObject jsonResponse = new JSONObject(content.toString());
-                            JSONArray items = jsonResponse.getJSONArray("items");
-
-                            if (items.length() == 0) {
-                                if (retryCount < maxRetries) {
-                                    retryCount++;
-                                    System.out.printf("No results found, retrying %d/%d%n", retryCount, maxRetries);
-                                } else {
-                                    hasMoreResults = false;
-                                }
-                            } else {
-                                retryCount = 0; // reset retry count if results are found
-                                for (int i = 0; i < items.length(); i++) {
-                                    JSONObject item = items.getJSONObject(i);
-                                    String fileName = item.getString("name");
-                                    String repoName = item.getJSONObject("repository").getString("full_name");
-                                    boolean isPrivate = item.getJSONObject("repository").getBoolean("private");
-                                    String visibility = isPrivate ? "Private" : "Public";
-                                    String fileType = getFileExtension(fileName);
-                                    String fileUrl = item.getString("html_url");
-
-                                    if (isValidFile(fileName) && !containsExcludedRepoKeyword(repoName)) {
-                                        Row row = sheet.createRow(rowNum++);
-                                        row.createCell(0).setCellValue(fileName);
-                                        row.createCell(1).setCellValue(repoName);
-
-                                        JSONArray textMatches = item.getJSONArray("text_matches");
-                                        StringBuilder snippets = new StringBuilder();
-                                        for (int j = 0; j < textMatches.length(); j++) {
-                                            JSONObject textMatch = textMatches.getJSONObject(j);
-                                            String fragment = textMatch.getString("fragment");
-                                            snippets.append(fragment).append("\n");
-                                        }
-                                        row.createCell(2).setCellValue(snippets.toString());
-                                        row.createCell(3).setCellValue(searchKeyword);
-                                        row.createCell(4).setCellValue(fileType);
-                                        row.createCell(5).setCellValue(visibility);
-                                        row.createCell(6).setCellValue(fileUrl);
-                                    }
-                                }
-                                page++;
-                            }
-                        } else {
-                            hasMoreResults = false;
-                            System.out.printf("Unexpected response code: %d%n", responseCode);
-                        }
-                        
-                        // 延迟每个请求，减少请求频率
-                        Thread.sleep(2000); // 等待2秒
-                    }
-
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    if (++retryCount >= maxRetries) {
-                        hasMoreResults = false;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            // Write the output to a file
-            try (FileOutputStream fileOut = new FileOutputStream("GitHubSearchResults.xlsx")) {
-                workbook.write(fileOut);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-    }
-
-    private static String generateQuery(String keyword, String organization) {
-        return String.format("%s+org:%s+is:public+archived:false", keyword, organization);
-    }
-
-    private static boolean isValidFile(String fileName) {
-        for (String extension : EXCLUDED_EXTENSIONS) {
-            if (fileName.endsWith(extension)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static boolean containsExcludedRepoKeyword(String repoName) {
-        for (String keyword : EXCLUDED_REPO_KEYWORDS) {
-            if (repoName.toLowerCase().contains(keyword.toLowerCase())) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static String getFileExtension(String fileName) {
-        int dotIndex = fileName.lastIndexOf('.');
-        if (dotIndex >= 0) {
-            return fileName.substring(dotIndex + 1);
-        }
-        return "";
-    }
-}
+Conclusion
+In 2024, I made significant progress in both project execution and skill development, particularly in cloud computing, front-end, and back-end technologies. My work on shutting down the ESA legacy WebSphere Application Server, migrating legacy jobs to the Sparter system with varied scheduling needs, and resolving MQ configuration issues in the SAM EFM F24 testing project showcased my project management, technical, and collaborative skills. I also tackled technical challenges like resolving CSV generation memory issues, enhancing system efficiency. Moving forward, I am committed to advancing my technical capabilities and contributing to impactful projects that align with our team’s goals. I look forward to utilizing my enhanced skill set to take on more complex challenges and drive continuous improvement in our systems and processes.
