@@ -1,8 +1,7 @@
-
-下面给出一个完整的可执行项目示例，包含 pom.xml 以及所有 Java 源代码文件和配置文件。请按照下面的目录结构创建项目，并将各个文件放入相应目录中，然后用 IDEA 导入该 Maven 项目，即可直接编译执行（前提是本地已配置好 Kafka、MQ 服务）。
+下面给出一个完整的示例项目代码，展示如何将 EquityFTBProperties 和 FundFTBProperties 的公共部分抽取到一个公共的抽象类中（称为 AbstractFtbProductProperties），从而供 Equity 与 Fund 的路由共用。项目示例只包含 FTB（Kafka→MQ）部分，其它模块（如 BTF）可按类似方式扩展。
 
 项目目录结构
-arduino
+less
 复制
 core-avaloq-messaging-adaptor
 ├── pom.xml
@@ -10,16 +9,19 @@ core-avaloq-messaging-adaptor
     ├── main
     │   ├── java
     │   │   └── x
-    │   │       ├── Application.java                   // 应用入口，包 x
-    │   │       ├── common                              // 公共模块，包 x.common
+    │   │       ├── Application.java                   // 应用入口 (包 x)
+    │   │       ├── common                              // 公共模块 (包 x.common)
     │   │       │   ├── AbstractKafkaHeaderConfig.java  // 公共 Kafka header 配置抽象类
-    │   │       │   ├── AbstractProcessorMappingProperties.java  // 公共 Processor 映射抽象类
+    │   │       │   ├── AbstractProcessorMappingProperties.java  // 公共 processor 映射抽象类
+    │   │       │   ├── AbstractFtbProductProperties.java  // 公共 FTB 产品配置抽象类（包含 broker 和 topics）
     │   │       │   ├── MessageProcessor.java           // 处理器接口
     │   │       │   └── ProcessorFactory.java           // 处理器工厂（映射由外部传入）
-    │   │       ├── ftb                                 // FTB 模块（Kafka → MQ），包 x.ftb
+    │   │       ├── ftb                                 // FTB 模块（Kafka → MQ） (包 x.ftb)
     │   │       │   ├── config
-    │   │       │   │   ├── FtbKafkaHeaderConfig.java     // FTB 方向 Kafka header 配置
-    │   │       │   │   └── FtbProcessorMappingProperties.java  // FTB 方向 processor 映射配置
+    │   │       │   │   ├── EquityFTBProperties.java      // Equity FTB 配置（继承自 AbstractFtbProductProperties）
+    │   │       │   │   ├── FundFTBProperties.java        // Fund FTB 配置（继承自 AbstractFtbProductProperties）
+    │   │       │   │   ├── FtbKafkaHeaderConfig.java     // FTB Kafka header 配置
+    │   │       │   │   └── FtbProcessorMappingProperties.java  // FTB processor 映射配置
     │   │       │   ├── processor
     │   │       │   │   ├── common
     │   │       │   │   │   └── GenericProcessor.java      // 通用处理器
@@ -31,22 +33,6 @@ core-avaloq-messaging-adaptor
     │   │       │       ├── AbstractFTBRoute.java         // FTB 路由抽象类
     │   │       │       ├── EquityFTBRoute.java             // Equity FTB 路由
     │   │       │       └── FundFTBRoute.java               // Fund FTB 路由
-    │   │       └── btf                                 // BTF 模块（MQ → Kafka），包 x.btf
-    │   │           ├── config
-    │   │           │   ├── BtfKafkaHeaderConfig.java       // BTF 方向 Kafka header 配置
-    │   │           │   ├── BtfProcessorMappingProperties.java  // BTF 方向 processor 映射配置（如需单独配置）
-    │   │           │   ├── TopicMappingProperties.java      // 产品类型→Kafka topic 映射（BTF 方向）
-    │   │           │   └── MQMessage.java                   // MQ 消息模型（原 DynamicMessage 改名）
-    │   │           ├── processor                         // BTF 模块专用 processor（如果需要）
-    │   │           │   ├── common
-    │   │           │   │   └── BtfGenericProcessor.java     // BTF 通用处理器（示例）
-    │   │           │   ├── equity
-    │   │           │   │   └── EquityBtfProcessor.java        // BTF Equity 定制处理器（示例）
-    │   │           │   └── fund
-    │   │           │       └── FundBtfProcessor.java          // BTF Fund 定制处理器（示例）
-    │   │           └── route
-    │   │               ├── AbstractBTFRoute.java            // BTF 路由抽象类
-    │   │               └── EquityBTFRoute.java              // 针对 Equity 的 BTF 路由（MQ → Kafka）
     │   └── resources
     │       └── application.yml                           // 配置文件
     └── test
@@ -62,7 +48,7 @@ xml
 <project
         xmlns="http://maven.apache.org/POM/4.0.0"
         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+        xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
                         http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
@@ -180,7 +166,7 @@ xml
         </plugins>
     </build>
 </project>
-2. 公共模块代码（包 x.common）
+2. 公共模块 (x.common)
 2.1 AbstractKafkaHeaderConfig.java
 路径：src/main/java/x/common/AbstractKafkaHeaderConfig.java
 
@@ -234,7 +220,59 @@ public abstract class AbstractProcessorMappingProperties {
         this.mapping = mapping;
     }
 }
-2.3 MessageProcessor.java
+2.3 AbstractFtbProductProperties.java
+路径：src/main/java/x/common/AbstractFtbProductProperties.java
+
+java
+复制
+package x.common;
+
+import java.util.Map;
+
+public abstract class AbstractFtbProductProperties {
+    /**
+     * Kafka broker 地址（产品通用）
+     */
+    private String broker;
+
+    /**
+     * 产品对应的主题配置，key 为主题名称，
+     * value 为包含 headers 与 processor 配置的对象
+     */
+    private Map<String, TopicConfig> topics;
+
+    public static class TopicConfig {
+        private String headers;
+        private String processor;
+        // Getters and Setters
+        public String getHeaders() {
+            return headers;
+        }
+        public void setHeaders(String headers) {
+            this.headers = headers;
+        }
+        public String getProcessor() {
+            return processor;
+        }
+        public void setProcessor(String processor) {
+            this.processor = processor;
+        }
+    }
+
+    public String getBroker() {
+        return broker;
+    }
+    public void setBroker(String broker) {
+        this.broker = broker;
+    }
+    public Map<String, TopicConfig> getTopics() {
+        return topics;
+    }
+    public void setTopics(Map<String, TopicConfig> topics) {
+        this.topics = topics;
+    }
+}
+2.4 MessageProcessor.java
 路径：src/main/java/x/common/MessageProcessor.java
 
 java
@@ -246,7 +284,7 @@ import org.apache.camel.Exchange;
 public interface MessageProcessor {
     void process(Exchange exchange) throws Exception;
 }
-2.4 ProcessorFactory.java
+2.5 ProcessorFactory.java
 路径：src/main/java/x/common/ProcessorFactory.java
 
 java
@@ -256,7 +294,6 @@ package x.common;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -289,9 +326,41 @@ public class ProcessorFactory {
         return processors;
     }
 }
-3. FTB 模块（包 x.ftb）
+3. FTB 模块 (x.ftb)
 3.1 配置类
-3.1.1 FtbKafkaHeaderConfig.java
+3.1.1 EquityFTBProperties.java
+路径：src/main/java/x/ftb/config/EquityFTBProperties.java
+
+java
+复制
+package x.ftb.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+import x.common.AbstractFtbProductProperties;
+
+@Component
+@ConfigurationProperties(prefix = "kafka.ftb.equity")
+public class EquityFTBProperties extends AbstractFtbProductProperties {
+    // 如果 Equity 有专有属性，可在此添加
+}
+3.1.2 FundFTBProperties.java
+路径：src/main/java/x/ftb/config/FundFTBProperties.java
+
+java
+复制
+package x.ftb.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+import x.common.AbstractFtbProductProperties;
+
+@Component
+@ConfigurationProperties(prefix = "kafka.ftb.fund")
+public class FundFTBProperties extends AbstractFtbProductProperties {
+    // 如果 Fund 有专有属性，可在此添加
+}
+3.1.3 FtbKafkaHeaderConfig.java
 路径：src/main/java/x/ftb/config/FtbKafkaHeaderConfig.java
 
 java
@@ -305,9 +374,9 @@ import x.common.AbstractKafkaHeaderConfig;
 @Component
 @ConfigurationProperties(prefix = "kafka.ftb.headers")
 public class FtbKafkaHeaderConfig extends AbstractKafkaHeaderConfig {
-    // 使用公共抽象类中的逻辑
+    // 直接继承公共逻辑
 }
-3.1.2 FtbProcessorMappingProperties.java
+3.1.4 FtbProcessorMappingProperties.java
 路径：src/main/java/x/ftb/config/FtbProcessorMappingProperties.java
 
 java
@@ -321,9 +390,9 @@ import x.common.AbstractProcessorMappingProperties;
 @Component
 @ConfigurationProperties(prefix = "kafka.ftb.processor")
 public class FtbProcessorMappingProperties extends AbstractProcessorMappingProperties {
-    // 使用公共抽象类中的逻辑
+    // 直接继承公共逻辑
 }
-3.2 Processor 部分（FTB）
+3.2 Processor 部分 (FTB)
 3.2.1 GenericProcessor.java
 路径：src/main/java/x/ftb/processor/common/GenericProcessor.java
 
@@ -406,7 +475,7 @@ public abstract class AbstractFTBRoute extends RouteBuilder {
 
     // 子类提供 Kafka 主题（例如 ftb-equity-topic-1）
     protected abstract String getTopics();
-    // 子类提供 Kafka Broker 地址
+    // 子类提供 Kafka Broker 地址（FTB方向）
     protected abstract String getKafkaBrokers();
     // 子类提供 MQ 队列名称（FTB 路由：Kafka → MQ）
     protected abstract String getDestinationQueue();
@@ -459,23 +528,17 @@ java
 package x.ftb.route.ftb;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import x.common.ProcessorFactory;
+import x.ftb.config.EquityFTBProperties;
 import x.ftb.config.FtbKafkaHeaderConfig;
 import x.ftb.config.FtbProcessorMappingProperties;
-import x.common.ProcessorFactory;
 
 @Component
 public class EquityFTBRoute extends AbstractFTBRoute {
 
-    @Value("${kafka.ftb.equity.topics}")
-    private String equityTopics;
-
-    @Value("${kafka.ftb.equity.broker}")
-    private String equityBrokers;
-
-    @Value("${mq.queue}")
-    private String commonQueue;
+    @Autowired
+    private EquityFTBProperties equityFTBProperties;
 
     @Autowired
     private ProcessorFactory processorFactory;
@@ -487,18 +550,19 @@ public class EquityFTBRoute extends AbstractFTBRoute {
     private FtbProcessorMappingProperties processorMappingProperties;
 
     @Override
-    protected String getTopics() {
-        return equityTopics;
+    protected String getKafkaBrokers() {
+        return equityFTBProperties.getBroker();
     }
 
     @Override
-    protected String getKafkaBrokers() {
-        return equityBrokers;
+    protected String getTopics() {
+        // 示例中返回配置中第一个主题的 key
+        return equityFTBProperties.getTopics().keySet().iterator().next();
     }
 
     @Override
     protected String getDestinationQueue() {
-        return commonQueue;
+        return "commonQueue";
     }
 
     @Override
@@ -529,23 +593,17 @@ java
 package x.ftb.route.ftb;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import x.common.ProcessorFactory;
+import x.ftb.config.FundFTBProperties;
 import x.ftb.config.FtbKafkaHeaderConfig;
 import x.ftb.config.FtbProcessorMappingProperties;
-import x.common.ProcessorFactory;
 
 @Component
 public class FundFTBRoute extends AbstractFTBRoute {
 
-    @Value("${kafka.ftb.fund.topics}")
-    private String fundTopics;
-
-    @Value("${kafka.ftb.fund.broker}")
-    private String fundBrokers;
-
-    @Value("${mq.queue}")
-    private String commonQueue;
+    @Autowired
+    private FundFTBProperties fundFTBProperties;
 
     @Autowired
     private ProcessorFactory processorFactory;
@@ -557,18 +615,19 @@ public class FundFTBRoute extends AbstractFTBRoute {
     private FtbProcessorMappingProperties processorMappingProperties;
 
     @Override
-    protected String getTopics() {
-        return fundTopics;
+    protected String getKafkaBrokers() {
+        return fundFTBProperties.getBroker();
     }
 
     @Override
-    protected String getKafkaBrokers() {
-        return fundBrokers;
+    protected String getTopics() {
+        // 示例中返回配置中第一个主题的 key
+        return fundFTBProperties.getTopics().keySet().iterator().next();
     }
 
     @Override
     protected String getDestinationQueue() {
-        return commonQueue;
+        return "commonQueue";
     }
 
     @Override
@@ -591,7 +650,9 @@ public class FundFTBRoute extends AbstractFTBRoute {
         return "FundFTBRoute";
     }
 }
-4. BTF 模块（包 x.btf）
+4. BTF 模块 (x.btf)
+（此处只简单保留配置类与 EquityBTFRoute 示例，其他部分可按需要扩展）
+
 4.1 配置类
 4.1.1 BtfKafkaHeaderConfig.java
 路径：src/main/java/x/btf/config/BtfKafkaHeaderConfig.java
@@ -607,10 +668,10 @@ import x.common.AbstractKafkaHeaderConfig;
 @Component
 @ConfigurationProperties(prefix = "kafka.btf.headers")
 public class BtfKafkaHeaderConfig extends AbstractKafkaHeaderConfig {
-    // 直接使用公共抽象类中的逻辑
+    // 直接使用公共逻辑
 }
 4.1.2 BtfProcessorMappingProperties.java
-（可选，如需 BTF 独立 processor 映射） 路径：src/main/java/x/btf/config/BtfProcessorMappingProperties.java
+路径：src/main/java/x/btf/config/BtfProcessorMappingProperties.java
 
 java
 复制
@@ -688,30 +749,9 @@ public class MQMessage {
     }
 }
 4.2 BTF Processor 部分
-（可选，若 BTF 方向需要单独的处理器）
+（示例：EquityBtfProcessor）
 
-4.2.1 BtfGenericProcessor.java
-路径：src/main/java/x/btf/processor/common/BtfGenericProcessor.java
-
-java
-复制
-package x.btf.processor.common;
-
-import org.apache.camel.Exchange;
-import org.apache.camel.Processor;
-import org.springframework.stereotype.Component;
-import x.common.MessageProcessor;
-
-@Component("btfGenericProcessor")
-public class BtfGenericProcessor implements MessageProcessor, Processor {
-    @Override
-    public void process(Exchange exchange) throws Exception {
-        String body = exchange.getIn().getBody(String.class);
-        body = body.replace("Generic", "BTF Processed Generic");
-        exchange.getIn().setBody(body);
-    }
-}
-4.2.2 EquityBtfProcessor.java
+4.2.1 EquityBtfProcessor.java
 路径：src/main/java/x/btf/processor/equity/EquityBtfProcessor.java
 
 java
@@ -729,27 +769,6 @@ public class EquityBtfProcessor implements MessageProcessor, Processor {
     public void process(Exchange exchange) throws Exception {
         String body = exchange.getIn().getBody(String.class);
         body = body.replace("Equity", "BTF Processed Equity");
-        exchange.getIn().setBody(body);
-    }
-}
-4.2.3 FundBtfProcessor.java
-路径：src/main/java/x/btf/processor/fund/FundBtfProcessor.java
-
-java
-复制
-package x.btf.processor.fund;
-
-import org.apache.camel.Exchange;
-import org.apache.camel.Processor;
-import org.springframework.stereotype.Component;
-import x.common.MessageProcessor;
-
-@Component("fundBtfProcessor")
-public class FundBtfProcessor implements MessageProcessor, Processor {
-    @Override
-    public void process(Exchange exchange) throws Exception {
-        String body = exchange.getIn().getBody(String.class);
-        body = body.replace("Fund", "BTF Processed Fund");
         exchange.getIn().setBody(body);
     }
 }
@@ -782,7 +801,7 @@ public abstract class AbstractBTFRoute extends RouteBuilder {
     protected abstract ProcessorFactory getProcessorFactory();
     // 子类提供 BtfKafkaHeaderConfig 实例
     protected abstract BtfKafkaHeaderConfig getKafkaHeaderConfig();
-    // 子类提供 BTF 方向 processor 映射（Map 类型）
+    // 子类提供 BTF 方向 processor 映射配置（Map 类型）
     protected abstract java.util.Map<String, String> getBtfMapping();
 
     @Override
@@ -819,7 +838,7 @@ public abstract class AbstractBTFRoute extends RouteBuilder {
                     exchange.getIn().setHeader(entry.getKey(), entry.getValue());
                 }
             })
-            // 调用 processor 链对 MQ 消息进行额外处理
+            // 调用 processor 链进行额外处理（使用 BTF 映射）
             .process(exchange -> {
                 MQMessage message = exchange.getIn().getBody(MQMessage.class);
                 List<MessageProcessor> processors = getProcessorFactory().getProcessors(message.getProductType(), getBtfMapping());
@@ -953,46 +972,49 @@ kafka:
   btf:
     equity:
       broker: "equity.kafka.broker:9092"
-      topics:
-        btf-equity-topic-1:
-          headers: "equityHeader1=equityValue1,equityHeader2=equityValue2"
-          processor: "equityCustomProcessor,genericProcessor"
-          topic-mapping: Equity
-        btf-equity-topic-2:
-          headers: "equityHeader1=equityValue3,equityHeader2=equityValue4"
-          processor: "equityCustomProcessor,genericProcessor"
-          topic-mapping: Fund4
+      topics: "btf-equity-topic-1,btf-equity-topic-2"
+      headers:
+        btf-equity-topic-1: "equityHeader1=equityValue1,equityHeader2=equityValue2"
+        btf-equity-topic-2: "equityHeader1=equityValue3,equityHeader2=equityValue4"
+      processor:
+        mapping:
+          btf-equity-topic-1: "equityCustomProcessor,genericProcessor"
+          btf-equity-topic-2: "equityCustomProcessor,genericProcessor"
+      topicmapping:
+        Equity: "btf-equity-topic-1"
+        Fund4: "btf-equity-topic-2"
     fund:
       broker: "fund.kafka.broker:9092"
-      topics:
-        btf-fund-topic-1:
-          headers: "fundHeader1=fundValue1,fundHeader2=fundValue2"
-          processor: "fundCustomProcessor,genericProcessor"
-          topic-mapping: Fund
-        btf-fund-topic-2:
-          headers: "fundHeader1=fundValue3,fundHeader2=fundValue2"
-          processor: "fundCustomProcessor"
-          topic-mapping: Equity2
-    processor:
-      mapping:
-        # BTF 方向的 processor 映射配置（Map 类型），按产品类型映射
-        Equity: "equityCustomProcessor,genericProcessor"
-        Fund: "fundCustomProcessor,genericProcessor"
+      topics: "btf-fund-topic-1,btf-fund-topic-2"
+      headers:
+        btf-fund-topic-1: "fundHeader1=fundValue1,fundHeader2=fundValue2"
+        btf-fund-topic-2: "fundHeader1=fundValue3,fundHeader2=fundValue2"
+      processor:
+        mapping:
+          btf-fund-topic-1: "fundCustomProcessor,genericProcessor"
+          btf-fund-topic-2: "fundCustomProcessor"
+      topicmapping:
+        Fund: "btf-fund-topic-1"
+        Equity2: "btf-fund-topic-2"
 
 mq:
   queue: "commonQueue"
 说明
 公共模块 (x.common)
-存放公共的 MQ 消息模型、接口、抽象配置类与 ProcessorFactory。
-FTB 模块 (x.ftb)
-提供专用于 Kafka→MQ 的配置类（FtbKafkaHeaderConfig、FtbProcessorMappingProperties）、处理器（GenericProcessor、EquityCustomProcessor、FundCustomProcessor）及路由（AbstractFTBRoute、EquityFTBRoute、FundFTBRoute）。
-BTF 模块 (x.btf)
-提供专用于 MQ→Kafka 的配置类（BtfKafkaHeaderConfig、BtfProcessorMappingProperties、TopicMappingProperties、MQMessage）及路由（AbstractBTFRoute、EquityBTFRoute）。BTF 路由中处理器映射使用的是 BtfProcessorMappingProperties，通过 ProcessorFactory 的 getProcessors(topic, mapping) 方法传入。
-配置文件 (application.yml)
-分别配置了 kafka.ftb 和 kafka.btf 的相关参数，以及 MQ 队列。
-将以上所有文件创建到相应目录后，在 IDEA 中导入该 Maven 项目，然后执行 Maven clean install（或直接运行 Application.java），即可编译并运行项目。
+提供共用的抽象配置类（AbstractKafkaHeaderConfig、AbstractProcessorMappingProperties、AbstractFtbProductProperties）、处理器接口 MessageProcessor 和 ProcessorFactory。
 
-这样完整的代码示例可以直接编译执行，前提是您已正确配置环境和依赖。
+FTB 模块 (x.ftb)
+通过 EquityFTBProperties 与 FundFTBProperties（均继承自 AbstractFtbProductProperties）配置各自产品的 broker 与主题映射；其余配置类 FtbKafkaHeaderConfig 与 FtbProcessorMappingProperties 负责解析 header 与 processor 映射。路由 EquityFTBRoute 和 FundFTBRoute 从相应配置中读取参数，并使用 ProcessorFactory 调用 processor 链处理消息，然后将消息转换为 XML 发送到 MQ。
+
+BTF 模块 (x.btf)
+提供 BtfKafkaHeaderConfig、BtfProcessorMappingProperties（可选）、TopicMappingProperties（将 MQ 消息中的产品类型映射到目标 Kafka topic）以及 MQMessage 模型。BTF 路由 AbstractBTFRoute 和 EquityBTFRoute 负责从 MQ 接收 XML 消息、反序列化为 MQMessage、设置 header、调用 processor 链（使用 BTF 映射），最后转换为 JSON 发送到 Kafka。
+
+application.yml
+分别配置了 kafka.ftb.equity、kafka.ftb.fund、kafka.btf.equity、kafka.btf.fund 以及 MQ 队列配置。
+
+将以上所有文件按照对应路径创建，然后用 IDEA 导入该 Maven 项目，确保 pom.xml 正确后执行 Application.java 即可启动项目。
+
+这就是修改后完整可执行的项目代码示例。
 
 
 
