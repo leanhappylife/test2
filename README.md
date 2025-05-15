@@ -1,96 +1,44 @@
-# IBM MQ Global Configuration (mapped by IbmMqProperties)
-ibm:
-  mq:
-    queueManager: "QM1"
-    channel: "DEV.APP.SVRCONN"
-    connName: "localhost(1414)"
-    user: "app"
-    password: "pas"
-    queue: "commonQueue"
+Here's the modified email text clearly formatted for easy copying directly into Word:
 
-# ===============================
-# 1) Kafka Common Configuration
-# ===============================
-kafkaConfig:
-  kafka_1:
-    bootstrap-servers: "xx:9092"
-    security.protocol: "SASL_SSL"
-    sasl.mechanism: "SCRAM-SHA-512"
-    sasl.jaas.config: >
-      org.apache.kafka.common.security.scram.ScramLoginModule required
-      username="kafka_consumer_user"
-      password="YOUR_CONSUMER_PASSWORD";
-    consumer:
-      group-id: "share-broker-order-domain-event"
-      auto-offset-reset: "earliest"
-    producer:
-      client-id: "xx-service"
-      acks: "all"
-      retries: 0
+---
 
-# ===============================
-# 2) Unified Kafka Wrapper Configuration
-# ===============================
-kafkaWrapper:
-  sharedPoolSize: 20
-  products:
-    equity:
-      broker: "${kafkaConfig.kafka_1.bootstrap-servers}"
-      security:
-        protocol: "${kafkaConfig.kafka_1.security.protocol}"
-        saslMechanism: "${kafkaConfig.kafka_1.sasl.mechanism}"
-        saslJaasConfig: "${kafkaConfig.kafka_1.sasl.jaas.config}"
-      consumer:
-        groupId: "${kafkaConfig.kafka_1.consumer.group-id}"
-        autoOffsetReset: "${kafkaConfig.kafka_1.consumer.auto-offset-reset}"
-      topics:
-        topic_1:
-          name: "equity-topic-wrapper"
-          headers:
-            header1: value1
-            header2: value2
-          concurrency: 3
-          eventProcessorMapping:
-            orderCreated: "equityCustomProcessor,genericProcessor"
-            orderCancelled: "genericProcessor"
-        topic_2:
-          name: "topic_2"
-          headers:
-            header1: value1
-            header2: value2
-          concurrency: 3
-          eventProcessorMapping:
-            orderCreated2: "equityCustomProcessor,genericProcessor"
-            orderCancelled2: "genericProcessor"
-    fund:
-      broker: "yy:9092"
-      security:
-        protocol: "SASL_SSL"
-        saslMechanism: "SCRAM-SHA-512"
-        saslJaasConfig: >
-          org.apache.kafka.common.security.scram.ScramLoginModule required
-          username="fund_kafka_user"
-          password="YOUR_FUND_PASSWORD";
-      consumer:
-        groupId: "fund-group"
-        autoOffsetReset: "latest"
-      topics:
-        topic_1:
-          name: "fund-topic-wrapper"
-          headers:
-            headerA: foo
-            headerB: bar
-          concurrency: 2
-          eventProcessorMapping:
-            subscriptionCreated: "fundCustomProcessor,genericProcessor"
-            subscriptionCancelled: "genericProcessor"
+**Subject:** Action Required: Approval for AWS SFTP Security Policy Exemption (Exemption ID: 4FF1D855)
 
-# ===============================
-# 3) Kafka Business Configuration for Dispatcher (MQ -> Kafka)
-# ===============================
-kafkaDispatcher:
-  equity:
-    broker: "${kafkaConfig.kafka_1.bootstrap-servers}"
-    sourceQueue: "equityDispatcherQueue"
-    targetTopic: "equity-topic-dispatcher"
-    concurrency: 2
+**To:** Will Collison
+**Cc:** Jhanhavi Ravindra Prabhu, Security Compliance Team
+**From:** Samson G Q Su
+
+Dear Will,
+
+I hope you're well.
+
+I'm reaching out to seek your formal approval, as the DSEC control owner, for a temporary exemption from the AWS Transfer Family security policy (P2 control) concerning our PBCCL production environment. This exemption request is critical to maintaining uninterrupted and secure operations during a crucial migration phase.
+
+Please see the summarized rationale below:
+
+**1. Legacy System Constraints (PBCCL)**
+
+* PBCCL handles the transfer of over 500 mission-critical reports daily, classified as Confidential (P2).
+* PBCCL currently operates on RHEL 6 with OpenSSH 5.3.
+* ITID confirmed upgrading OpenSSH to version 8.7 necessitates a full OS upgrade to RHEL 9, which is presently not viable.
+
+**2. Strategic Migration to AWS Cloud and Planning**
+
+* PBCCL is actively migrating to AWS cloud infrastructure, targeted for completion by year-end.
+* The OS upgrade from RHEL 6 to RHEL 8/9 is currently deprioritized to ensure resources focus on the critical SSP migration.
+* Post-migration, comprehensive strategic planning will address modernization, including OS upgrades.
+* Upon successful migration, we will immediately revert to the mandated TransferSecurityPolicy-2022-03, terminating this temporary exemption.
+
+**3. Immediate Business Deadlines**
+
+* A reliable and secure file-transfer mechanism must be in place by mid-May 2025 to meet essential business timelines for transferring reports from PBCCL to Sparta.
+
+**Exemption Specifics:**
+
+* **Exemption ID:** 4FF1D855
+* **Duration Requested:** 12 months
+* **Reference Documentation:** [AWS Transfer Family Confluence Page](https://alm-confluence.systems.uk.hsbc/confluence/display/EFOS/2.3.+AWS+transfer+family+between+Sparta+and+PBCCL)
+
+Your prompt approval of this exemption is greatly appreciated. Should you require further details or a discussion, I am available at your earliest convenience.
+
+
