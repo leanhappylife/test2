@@ -101,7 +101,16 @@ Stakeholders: Reviewing test outcomes, providing timely feedback, and approving 
 
 PBCCL Daily Batch Processing Diagram
 
-TARA Finance Migration Plan
+TARA Finance Migration Plan我上传了多张 Java 源代码截图，包含 Version 1 和 Version 2。
+
+请你执行以下任务：
+1. 识别截图中的所有代码内容，并按版本分类整理成可复制的 Java 文本（Version 1 / Version 2 分开）。
+2. 自动分析两个版本在逻辑、参数处理、日期计算、异常处理等方面的差异。
+3. 解释为什么 Version 1 和 Version 2 会运行出不同结果（如果可能，请给出示例说明）。
+4. 指出 Version 2 相比 Version 1 是否修复了 bug、是否引入新的 bug、逻辑是否改变。
+5. 最后给出一句总结：在真实生产环境中应该使用哪个版本，并说明理由。
+
+注意：请逐段对比，不要只总结，需要你详细说明变化细节。
 
 Finance Reconciliation Guidelines
 
