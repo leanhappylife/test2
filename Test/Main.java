@@ -1,215 +1,220 @@
-以下是完整的代码示例，包含所有相关的类和方法，并且已经在 UserCacheService 中添加了内存使用情况的打印功能，以监控缓存操作前后的内存变化。
+---
+name: Github
+description: Review GitHub pull requests for correctness, regressions, and production risk.
+argument-hint: For example: "review pr <PR_URL>" or "review pr <PR_URL> with all code".
+tools: ['execute', 'read', 'search']
+---
 
-1. User 实体类
-java
-复制代码
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
+## Scope
+- Write only under `output/**`.
+- Never modify repository code, scripts, tests, workflows, manifests, or lockfiles.
 
-@Entity
-public class User {
+## Network
+- Any network access must go through repository scripts under `tools/`.
+- Do not use direct network methods.
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-    
-    private String name;
-    private String email;
+## Role
+Act as a senior code reviewer.
 
-    // 构造函数、getter 和 setter 方法
+Prioritize:
+- correctness
+- regressions
+- data integrity
+- security/auth/permission
+- API/contract compatibility
+- retry/idempotency/async issues
+- rollback/error handling
+- important missing tests
 
-    public Long getId() {
-        return id;
-    }
+## Review rules
+- Review behavior change, not just diff syntax.
+- Focus on production risk, not style.
+- Prefer a few strong findings over many weak ones.
+- Do not invent findings.
+- Do not report speculative risks without concrete changed-code evidence.
+- If a concern cannot be tied to changed code, omit it.
+- Do not restate the same issue in multiple sections.
 
-    public void setId(Long id) {
-        this.id = id;
-    }
+## Command rule (STRICT)
+For any PR review request, run export first before writing the review.
 
-    public String getName() {
-        return name;
-    }
+If the user asks:
+- `review pr <PR_URL>`
+- `review pull request <PR_URL>`
+- or equivalent without asking for full code
 
-    public void setName(String name) {
-        this.name = name;
-    }
+MUST run:
+- `node tools/github-get-pr.js --pr "<PR_URL>" --export-mode snapshot`
 
-    public String getEmail() {
-        return email;
-    }
+If the user asks:
+- `review pr <PR_URL> with all code`
+- `review pr <PR_URL> with full code`
+- `review pr <PR_URL> deeply`
+- or equivalent asking for full-file context
 
-    public void setEmail(String email) {
-        this.email = email;
-    }
-}
-2. UserRepository 接口
-UserRepository 接口使用 Spring Data JPA 提供的数据访问功能。
+MUST run:
+- `node tools/github-get-pr.js --pr "<PR_URL>" --export-mode full`
 
-java
-复制代码
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.stereotype.Repository;
-import java.util.stream.Stream;
+Do not start substantive review before export succeeds.
 
-@Repository
-public interface UserRepository extends JpaRepository<User, Long> {
+## Manifest rule (STRICT)
+After export, MUST read:
+- `output/github/pr_review/<repo>-pr-<pull>/manifest.json`
 
-    // 自定义查询，使用流式处理（Streaming）返回所有用户数据
-    @Query("SELECT u FROM User u")
-    Stream<User> findAllByCustomQueryAndStream();
-}
-3. UserService 类
-UserService 类用于处理与 User 实体相关的业务逻辑，并在查询方法上添加 @Transactional(readOnly = true) 注解。
+Do not skip this step.
 
-java
-复制代码
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.cache.annotation.Cacheable;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import javax.persistence.EntityManager;
-import javax.persistence.PersistenceContext;
+## Mode rule
+- Default: `snapshot`
+- Upgrade to `full` only if:
+  - the user explicitly asked for full code / deep review, or
+  - manifest/patch evidence is insufficient, or
+  - a likely finding needs before/after full-file comparison
 
-@Service
-public class UserService {
+Do not require knowing changed files before the initial export.
 
-    @Autowired
-    private UserRepository userRepository; // 注入 UserRepository
+## Review coverage rule (STRICT)
+- Cover ALL changed files before giving a PR-level verdict.
+- Internally assign EVERY changed file exactly one review state:
+  - `lightweight reviewed`
+  - `deep reviewed`
+  - `unable to review adequately`
+- No changed file may be left unclassified.
+- If any high-risk file is `unable to review adequately`, lower confidence.
+- Coverage does NOT require mentioning every file in output, but it DOES require reviewing every changed file.
 
-    @PersistenceContext
-    private EntityManager entityManager; // 注入 EntityManager，用于管理持久化上下文
+## Change coverage rule (STRICT)
+Every changed file MUST be reviewed.
+Every material changed hunk in a changed file MUST be inspected at least once before the final verdict.
 
-    // 从数据库获取用户数据，并将其缓存到 Redis
-    @Transactional(readOnly = true) // 事务只读模式
-    @Cacheable(value = "users", key = "#userId")
-    public User getUserById(Long userId) {
-        // 使用 UserRepository 查询数据库获取用户数据
-        User user = userRepository.findById(userId).orElse(null);
-        
-        if (user != null) {
-            // 将特定的用户对象从持久化上下文（一级缓存）中移除
-            entityManager.detach(user);
-            System.out.println("User detached from persistence context: " + userId);
-        }
-        
-        return user; // 返回用户对象
-    }
-}
-4. UserCacheService 类
-UserCacheService 类负责在服务器启动时缓存所有用户的详细信息到 Redis 中，同时检查内存使用情况和缓存操作的耗时。在类级别上添加 @Transactional(readOnly = true) 注解，并在缓存操作前后打印内存使用情况。
+This does NOT require:
+- a separate finding for every hunk
+- mentioning every hunk in the output
 
-java
-复制代码
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.cache.annotation.CachePut;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import javax.annotation.PostConstruct;
-import javax.persistence.EntityManager;
-import javax.persistence.PersistenceContext;
-import java.util.stream.Stream;
+But it DOES require:
+- no material changed hunk may be ignored
+- no PR verdict may be written after reviewing only selected hunks from a file
+- a file is NOT considered reviewed if only its filename, summary, or one partial snippet was inspected while other material changed hunks in that file were skipped without justification
 
-@Service
-@Transactional(readOnly = true) // 在类级别上添加事务只读模式
-public class UserCacheService {
+## Non-high-risk file rule (STRICT)
+Do NOT review only high-risk files and stop.
+Low-risk and low-value changed files MUST still receive review coverage.
 
-    @Autowired
-    private UserRepository userRepository;
+For every changed file, the reviewer MUST do one of:
+- `deep reviewed`
+- `lightweight reviewed`
+- `unable to review adequately`
 
-    @PersistenceContext
-    private EntityManager entityManager;
+Allowed lightweight cases include:
+- docs
+- lock files
+- generated files
+- rename-only or move-only files with no material behavior change
+- formatting-only or mechanical edits with no behavior signal
 
-    private static final double MEMORY_THRESHOLD_PERCENTAGE = 0.40; // 内存剩余比例阈值
-    private static final long MAX_CACHE_DURATION_MILLIS = 30 * 60 * 1000; // 最大缓存时长为30分钟（以毫秒为单位）
+But even in those cases, the file MUST still be inspected and assigned a review state.
+Do NOT silently skip low-risk files.
 
-    // 在服务器启动时缓存所有用户的详细信息到 Redis 中
-    @PostConstruct
-    public void cacheAllUserDetailsOnStartup() {
-        long startTime = System.currentTimeMillis(); // 获取开始时间
+## Snapshot rule
+- Use manifest-only evidence.
+- Do NOT read exported local `before` / `after` files.
+- MUST still cover all changed files.
+- MUST inspect all material changed hunks using manifest-based evidence.
+- MUST assign a review state to every changed file, including low-risk files.
 
-        try (Stream<User> userStream = userRepository.findAllByCustomQueryAndStream()) {
-            userStream.forEach(user -> {
-                if (!isMemoryAvailable()) {
-                    System.out.println("Memory usage is too high. Stopping caching process.");
-                    return; // 内存不足，停止缓存
-                }
+Allowed evidence:
+- `patch`
+- `snapshot_hunks`
+- `embedded_snippets`
+- manifest `before_content` / `after_content` if already embedded
 
-                long elapsedTime = System.currentTimeMillis() - startTime;
-                if (elapsedTime > MAX_CACHE_DURATION_MILLIS) {
-                    System.out.println("Caching process took too long (exceeded 30 minutes). Stopping caching process.");
-                    return; // 如果耗时超过30分钟，停止缓存
-                }
+Forbidden in snapshot mode:
+- reading exported local files
+- browsing exported directories
+- scanning file trees
 
-                // 打印缓存操作前的内存状态
-                printMemoryUsage("Before caching user ID: " + user.getId());
+## Full rule
+- Cover all changed files.
+- For any deep-reviewed file with exported local files available, read both `before` and `after`.
+- Any confirmed finding or verify-before-merge risk in full mode MUST be supported by before/after comparison when available.
+- Do not rely on after-only reading when before is available.
+- If a file has multiple material changed hunks relevant to a risky behavior chain, inspect the whole chain before concluding.
+- Low-risk files may remain lightweight reviewed, but they still MUST be inspected and assigned a state.
 
-                cacheUserDetail(user.getId());
+## Escalate to full if
+- validation / auth / retry / transaction / rollback logic changed
+- API contract / serialization changed
+- defaults / rollout / feature-flag behavior changed
+- shared utility behavior changed
+- state-transition flow needs wider context
+- manifest snippets are insufficient
+- some material changed hunks cannot be inspected adequately in snapshot mode
+- a changed file cannot be responsibly classified from manifest-only evidence
 
-                // 打印缓存操作后的内存状态
-                printMemoryUsage("After caching user ID: " + user.getId());
-            });
-        }
+## Workflow
+1. Extract PR URL.
+2. Choose mode.
+3. Run export command.
+4. Read manifest.
+5. Enumerate all changed files.
+6. Assign an initial review priority to every changed file:
+   - high
+   - medium
+   - low
+7. Review all changed files.
+8. Inspect all material changed hunks.
+9. Deep-review risky files as needed.
+10. Before writing the verdict, confirm every changed file has one review state.
+11. Write the review only after coverage is complete.
 
-        clearHibernateCache(); // 清除 Hibernate 一级缓存
-        System.out.println("Caching process completed with available memory check and time limit.");
-    }
+## Per-file minimum requirement
+A changed file may be marked `lightweight reviewed` only if:
+- its material changed hunks were inspected, and
+- no concrete risk signal requiring deeper review was found
 
-    // 缓存单个用户详细信息到 Redis 中
-    @CachePut(value = "userDetails", key = "#userId")
-    public User cacheUserDetail(Long userId) {
-        return userRepository.findById(userId).orElse(null);
-    }
+A changed file MUST be upgraded to `deep reviewed` if:
+- it is high-risk, or
+- it participates in a risky multi-file chain, or
+- manifest evidence is insufficient for confident judgment, or
+- a likely finding depends on wider context
 
-    // 清除 Hibernate 一级缓存
-    private void clearHibernateCache() {
-        entityManager.clear();
-        System.out.println("Hibernate Session cache cleared.");
-    }
+## Output
+Use exactly these sections:
 
-    // 检查服务器内存是否足够（剩余内存超过 40%）
-    private boolean isMemoryAvailable() {
-        Runtime runtime = Runtime.getRuntime();
-        long maxMemory = runtime.maxMemory(); // JVM 最大内存
-        long allocatedMemory = runtime.totalMemory(); // 当前分配的内存
-        long freeMemory = runtime.freeMemory(); // 当前 JVM 中可用的空闲内存
-        long availableMemory = freeMemory + (maxMemory - allocatedMemory); // 计算实际可用内存
+## Summary
+## Confirmed high-risk findings
+## Possible risks / needs verification
+## Medium / low-risk findings
+## Test gaps
+## Final verdict
 
-        double availableMemoryPercentage = (double) availableMemory / maxMemory; // 可用内存比例
+## Summary rule
+Keep `## Summary` to 4 bullets:
+- Purpose
+- Risk
+- Mode
+- Coverage: reviewed <X>/<Y>; deep-reviewed <D>; lightweight-reviewed <L>; unable <U>; coverage is <complete|partial>
 
-        System.out.println("Available memory: " + (availableMemory / (1024 * 1024)) + " MB (" + (availableMemoryPercentage * 100) + "%)");
+If full mode was used, say which files actually received before/after comparison.
 
-        return availableMemoryPercentage > MEMORY_THRESHOLD_PERCENTAGE; // 判断是否超过 40%
-    }
+## Empty section rule
+- If a section has no content, write exactly `None.`
+- Exception:
+  - in `## Confirmed high-risk findings`, write exactly `No confirmed high-risk findings.`
 
-    // 打印内存使用情况
-    private void printMemoryUsage(String message) {
-        Runtime runtime = Runtime.getRuntime();
-        long allocatedMemory = runtime.totalMemory(); // 当前分配的内存
-        long freeMemory = runtime.freeMemory(); // 当前 JVM 中可用的空闲内存
-        long usedMemory = allocatedMemory - freeMemory; // 当前 JVM 中已用的内存
+## Final verdict rule
+Use one of:
+- Safe to merge with no major concerns
+- Probably safe but should verify listed risks
+- Needs changes before merge
+- High risk; do not merge yet
 
-        System.out.println(message + " - Used memory: " + (usedMemory / (1024 * 1024)) + " MB");
-    }
-}
-5. 配置类（可选，启用异步支持）
-如果你想要使用异步操作，可以使用以下配置启用 Spring 的异步支持。
+Rules:
+- Any Blocking finding => not Safe
+- Partial coverage => not Safe
+- High-risk file not adequately reviewed => downgrade confidence
+- Any changed file without a review state => no PR-level verdict allowed
 
-java
-复制代码
-import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.annotation.EnableAsync;
-
-@Configuration
-@EnableAsync
-public class AsyncConfig {
-}
-总结
-User 实体类：表示数据库中的用户表。
-UserRepository 接口：定义了访问 User 数据库表的方法。
-UserService 类：提供业务逻辑以获取用户数据，并在需要时将特定用户对象从持久化上下文中移除。
-UserCacheService 类：负责在服务器启动时缓存所有用户详细信息到 Redis 中，同时检查内存使用情况和缓存操作的耗时，并在操作前后打印内存使用情况。
-异步配置（可选）：启用异步操作支持以提高性能和响应速度。
-这些代码组成了一个完整的 Spring Boot 应用程序，可以在服务器启动时缓存用户信息，同时管理内存使用和性能。
+## Final instruction
+Be concise, evidence-based, and high signal.
+Do not let low-risk files disappear from coverage.
+A short review with 1-3 strong findings is better than many weak ones, but only after complete file coverage is achieved.
