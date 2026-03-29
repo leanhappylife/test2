@@ -1,565 +1,315 @@
-=====================
-
-    @Transactional(readOnly = true)
-public <T, ID> void exportDataToCsv(JpaRepository<T, ID> repository, String fileName, String[] headers, Function<T, List<Object>> dataMapper) {
-    int pageSize = 300; // 每页的记录数量更小，减少内存占用
-    int pageNumber = 0; // 初始页码
-    final int flushThreshold = 1000; // 每1000条记录刷新一次
-    final int[] recordCount = {0};  // 记录已写入的记录数量
-
-    try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, false), 1024 * 1024);
-         CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
-
-        while (true) {
-            // 使用局部变量块限制对象的生命周期
-            {
-                Pageable pageable = PageRequest.of(pageNumber, pageSize);
-                Page<T> page = repository.findAll(pageable);
-
-                List<T> entities = new ArrayList<>(page.getContent());
-                if (entities.isEmpty()) {
-                    break; // 没有更多数据时退出循环
-                }
-
-                for (int i = 0; i < entities.size(); i++) {
-                    T entity = entities.get(i);
-                    csvPrinter.printRecord(dataMapper.apply(entity));
-                    recordCount[0]++;
-
-                    if (recordCount[0] % flushThreshold == 0) {
-                        csvPrinter.flush();
-                    }
-                    entities.set(i, null); // 清理引用
-                }
-
-                entityManager.clear(); // 清理 Hibernate 的一级缓存
-                // 释放局部变量范围内的对象
-            }
-
-            pageNumber++; // 读取下一页数据
-        }
-
-        csvPrinter.flush(); // 确保最后一批数据被写入
-        System.out.println("CSV file created successfully: " + fileName);
-
-    } catch (IOException e) {
-        e.printStackTrace();
-    }
-}
-
-
-
-    import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVPrinter;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
-
-import javax.persistence.EntityManager;
-import javax.persistence.PersistenceContext;
-import java.io.BufferedWriter;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Function;
-
-@Component
-public class CsvExportUtil {
-
-    @PersistenceContext  // 注入 EntityManager 用于清理缓存
-    private EntityManager entityManager;
-
-    @Transactional(readOnly = true)
-    public <T, ID> void exportDataToCsv(JpaRepository<T, ID> repository, String fileName, String[] headers, Function<T, List<Object>> dataMapper) {
-        int pageSize = 300; // 每页的记录数量更小，减少内存占用
-        int pageNumber = 0; // 初始页码
-        final int flushThreshold = 1000; // 每1000条记录刷新一次
-        final int[] recordCount = {0};  // 记录已写入的记录数量
-
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, false), 1024 * 1024);
-             CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
-
-            while (true) {
-                Pageable pageable = PageRequest.of(pageNumber, pageSize);
-                Page<T> page = repository.findAll(pageable);
-
-                // 将结果转换为可修改的集合
-                List<T> entities = new ArrayList<>(page.getContent());
-
-                if (entities.isEmpty()) {
-                    break; // 没有更多数据时退出循环
-                }
-
-                // 将每一页的数据写入 CSV 文件
-                for (T entity : entities) {
-                    csvPrinter.printRecord(dataMapper.apply(entity));
-                    recordCount[0]++;
-
-                    // 达到阈值时刷新
-                    if (recordCount[0] % flushThreshold == 0) {
-                        csvPrinter.flush();
-                    }
-                }
-
-                entities.clear(); // 清空当前批次的数据
-                entityManager.clear(); // 清理 Hibernate 的一级缓存
-                pageNumber++; // 读取下一页数据
-            }
-
-            csvPrinter.flush(); // 确保最后一批数据被写入
-            System.out.println("CSV file created successfully: " + fileName);
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-}
-
-    ========================
-
-
-
-
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVPrinter;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
-
-import javax.persistence.EntityManager;
-import java.io.BufferedWriter;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Function;
-
-@Component
-public class CsvExportUtil {
-
-    @Autowired
-    private EntityManager entityManager; // 注入 EntityManager 用于清理缓存
-
-    @Transactional(readOnly = true)
-    public <T, ID> void exportDataToCsv(JpaRepository<T, ID> repository, String fileName, String[] headers, Function<T, List<Object>> dataMapper) {
-        int pageSize = 300; // 每页的记录数量更小，减少内存占用
-        int pageNumber = 0; // 初始页码
-        final int flushThreshold = 1000; // 每1000条记录刷新一次
-        final int[] recordCount = {0};  // 记录已写入的记录数量
-
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, false), 1024 * 1024);
-             CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
-
-            while (true) {
-                Pageable pageable = PageRequest.of(pageNumber, pageSize);
-                Page<T> page = repository.findAll(pageable);
-
-                // 将结果转换为可修改的集合
-                List<T> entities = new ArrayList<>(page.getContent());
-
-                if (entities.isEmpty()) {
-                    break; // 没有更多数据时退出循环
-                }
-
-                // 将每一页的数据写入 CSV 文件
-                for (T entity : entities) {
-                    csvPrinter.printRecord(dataMapper.apply(entity));
-                    recordCount[0]++;
-
-                    // 达到阈值时刷新
-                    if (recordCount[0] % flushThreshold == 0) {
-                        csvPrinter.flush();
-                    }
-                }
-
-                entities.clear(); // 清空当前批次的数据
-                entityManager.clear(); // 清理 Hibernate 的一级缓存
-                pageNumber++; // 读取下一页数据
-            }
-
-            csvPrinter.flush(); // 确保最后一批数据被写入
-            System.out.println("CSV file created successfully: " + fileName);
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-}
-
-
-
-
-@Repository
-public interface MyEntityWithEmbeddedIdRepository extends JpaRepository<MyEntityWithEmbeddedId, MyCompositeKey> {
-
-    @Query("SELECT e FROM MyEntityWithEmbeddedId e")
-    @QueryHints(value = {@QueryHint(name = "org.hibernate.cacheable", value = "false")})
-    Stream<MyEntityWithEmbeddedId> streamAllEntities();
-}
-
-
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVPrinter;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
-
-import javax.persistence.EntityManager;
-import java.io.BufferedWriter;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.List;
-import java.util.function.Function;
-
-@Component
-public class CsvExportUtil {
-
-    @Autowired
-    private EntityManager entityManager; // 注入 EntityManager 用于清理缓存
-
-    /**
-     * 通用的CSV导出方法
-     *
-     * @param repository  JPA 仓库，支持分页查询
-     * @param fileName    输出的CSV文件名
-     * @param headers     CSV文件的列标题
-     * @param dataMapper  数据转换函数，用于将实体类数据转换为CSV写入格式
-     * @param <T>         实体类型
-     * @param <ID>        主键类型
-     */
-    @Transactional(readOnly = true)
-    public <T, ID> void exportDataToCsv(JpaRepository<T, ID> repository, String fileName, String[] headers, Function<T, List<Object>> dataMapper) {
-        int pageSize = 300; // 每页的记录数量更小，减少内存占用
-        int pageNumber = 0; // 初始页码
-        final int flushThreshold = 1000; // 每1000条记录刷新一次
-        final int[] recordCount = {0};  // 记录已写入的记录数量
-
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, false), 1024 * 1024);
-             CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
-
-            // 循环分页读取数据，直到没有更多数据
-            while (true) {
-                Pageable pageable = PageRequest.of(pageNumber, pageSize);
-                Page<T> page = repository.findAll(pageable);
-                List<T> entities = page.getContent();
-
-                if (entities.isEmpty()) {
-                    break; // 没有更多数据时退出循环
-                }
-
-                // 将每一页的数据写入 CSV 文件
-                for (T entity : entities) {
-                    csvPrinter.printRecord(dataMapper.apply(entity));
-                    recordCount[0]++;
-
-                    // 达到阈值时刷新
-                    if (recordCount[0] % flushThreshold == 0) {
-                        csvPrinter.flush();
-                    }
-                }
-
-                entities.clear(); // 清空当前批次的数据
-                entityManager.clear(); // 清理 Hibernate 的一级缓存
-                pageNumber++; // 读取下一页数据
-            }
-
-            csvPrinter.flush(); // 确保最后一批数据被写入
-            System.out.println("CSV file created successfully: " + fileName);
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-}
-
-以下是修改后的所有可执行的代码，针对可能的内存问题进行了优化，确保在处理大数据量时（例如百万条记录）更高效并减少内存占用。
-
-1. 实体类 MyEntityWithEmbeddedId
-首先，定义一个使用 @EmbeddedId 作为复合主键的实体类。
-
-复合主键类 MyCompositeKey
-java
-复制代码
-import javax.persistence.Embeddable;
-import java.io.Serializable;
-
-@Embeddable
-public class MyCompositeKey implements Serializable {
-    private Long idPart1;
-    private String idPart2;
-
-    // 构造器、Getter 和 Setter 方法
-    public MyCompositeKey() {
-    }
-
-    public MyCompositeKey(Long idPart1, String idPart2) {
-        this.idPart1 = idPart1;
-        this.idPart2 = idPart2;
-    }
-
-    public Long getIdPart1() {
-        return idPart1;
-    }
-
-    public void setIdPart1(Long idPart1) {
-        this.idPart1 = idPart1;
-    }
-
-    public String getIdPart2() {
-        return idPart2;
-    }
-
-    public void setIdPart2(String idPart2) {
-        this.idPart2 = idPart2;
-    }
-
-    // 重写 equals 和 hashCode 方法
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-
-        MyCompositeKey that = (MyCompositeKey) o;
-
-        if (!idPart1.equals(that.idPart1)) return false;
-        return idPart2.equals(that.idPart2);
-    }
-
-    @Override
-    public int hashCode() {
-        int result = idPart1.hashCode();
-        result = 31 * result + idPart2.hashCode();
-        return result;
-    }
-}
-实体类 MyEntityWithEmbeddedId
-java
-复制代码
-import javax.persistence.EmbeddedId;
-import javax.persistence.Entity;
-
-@Entity
-public class MyEntityWithEmbeddedId {
-    @EmbeddedId
-    private MyCompositeKey id; // 嵌入式复合主键
-    private String name;
-    private String email;
-    private String country;
-
-    // Getters and Setters
-    public MyCompositeKey getId() {
-        return id;
-    }
-
-    public void setId(MyCompositeKey id) {
-        this.id = id;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
-    }
-
-    public String getCountry() {
-        return country;
-    }
-
-    public void setCountry(String country) {
-        this.country = country;
-    }
-}
-2. 仓库接口 MyEntityWithEmbeddedIdRepository
-定义支持分页查询的仓库接口：
-
-java
-复制代码
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
-@Repository
-public interface MyEntityWithEmbeddedIdRepository extends JpaRepository<MyEntityWithEmbeddedId, MyCompositeKey> {
-}
-3. 通用 CSV 导出工具类 CsvExportUtil
-优化后的 CsvExportUtil 类，增加了对大数据量处理的内存管理：
-
-java
-复制代码
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVPrinter;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.io.BufferedWriter;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.List;
-import java.util.function.Function;
-
-@Component
-public class CsvExportUtil {
-
-    /**
-     * 通用的CSV导出方法
-     *
-     * @param repository  JPA 仓库，支持分页查询
-     * @param fileName    输出的CSV文件名
-     * @param headers     CSV文件的列标题
-     * @param dataMapper  数据转换函数，用于将实体类数据转换为CSV写入格式
-     * @param <T>         实体类型
-     * @param <ID>        主键类型
-     */
-    @Transactional(readOnly = true)
-    public <T, ID> void exportDataToCsv(JpaRepository<T, ID> repository, String fileName, String[] headers, Function<T, List<Object>> dataMapper) {
-        int pageSize = 300; // 每页的记录数量更小，减少内存占用
-        int pageNumber = 0; // 初始页码
-        final int flushThreshold = 1000; // 每1000条记录刷新一次
-        final int[] recordCount = {0};  // 记录已写入的记录数量
-
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, false), 1024 * 1024);
-             CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
-
-            // 循环分页读取数据，直到没有更多数据
-            while (true) {
-                Pageable pageable = PageRequest.of(pageNumber, pageSize);
-                Page<T> page = repository.findAll(pageable);
-                List<T> entities = page.getContent();
-
-                if (entities.isEmpty()) {
-                    break; // 没有更多数据时退出循环
-                }
-
-                // 将每一页的数据写入 CSV 文件
-                for (T entity : entities) {
-                    csvPrinter.printRecord(dataMapper.apply(entity));
-                    recordCount[0]++;
-
-                    // 达到阈值时刷新
-                    if (recordCount[0] % flushThreshold == 0) {
-                        csvPrinter.flush();
-                    }
-                }
-
-                entities.clear(); // 清空当前批次的数据
-                pageNumber++; // 读取下一页数据
-            }
-
-            csvPrinter.flush(); // 确保最后一批数据被写入
-            System.out.println("CSV file created successfully: " + fileName);
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-}
-4. 服务类 CsvWriterEmbeddedIdService
-使用通用的 CSV 导出工具类导出带有 @EmbeddedId 主键的实体数据：
-
-java
-复制代码
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-
-import java.util.Arrays;
-import java.util.List;
-
-@Service
-public class CsvWriterEmbeddedIdService {
-
-    @Autowired
-    private MyEntityWithEmbeddedIdRepository myEntityWithEmbeddedIdRepository;
-
-    @Autowired
-    private CsvExportUtil csvExportUtil;
-
-    public void exportDataToCsv(String fileName) {
-        String[] headers = {"ID Part 1", "ID Part 2", "Name", "Email", "Country"};
-
-        csvExportUtil.exportDataToCsv(
-                myEntityWithEmbeddedIdRepository, // 传入特定的Repository
-                fileName,
-                headers,
-                // 数据转换函数，将 MyEntityWithEmbeddedId 对象转换为 CSV 行
-                entity -> Arrays.asList(
-                        entity.getId().getIdPart1(),    // 获取嵌入式主键的部分1
-                        entity.getId().getIdPart2(),    // 获取嵌入式主键的部分2
-                        entity.getName(),
-                        entity.getEmail(),
-                        entity.getCountry()
-                )
-        );
-    }
-}
-5. 控制器类 MyEntityController
-定义一个控制器来触发 CSV 导出操作：
-
-java
-复制代码
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
-
-@RestController
-public class MyEntityController {
-
-    @Autowired
-    private CsvWriterEmbeddedIdService csvWriterEmbeddedIdService;
-
-    @GetMapping("/export")
-    public String exportData() {
-        csvWriterEmbeddedIdService.exportDataToCsv("output.csv");
-        return "Data export started.";
-    }
-}
-6. Maven 依赖
-确保在 pom.xml 中添加 Apache Commons CSV 的依赖：
-
-xml
-复制代码
-<dependency>
-    <groupId>org.apache.commons</groupId>
-    <artifactId>commons-csv</artifactId>
-    <version>1.10.0</version> <!-- 使用最新的稳定版本 -->
-</dependency>
-关键优化点
-分页查询：
-
-每次分页查询的数量减少到 300 条，以减少内存占用。
-批量刷新：
-
-每 1000 条记录刷新一次，减少频繁 I/O 操作对性能的影响。
-及时清理数据：
-
-处理完每一页数据后，清空集合 entities.clear()，释放内存。
-调整 JVM 内存配置：
-
-配置 JVM 堆内存，以提供足够的内存空间进行大数据处理。
-总结
-通过这些优化措施，修改后的代码能够更高效地处理大数据量的导出操作，减少内存使用，防止内存溢出，并确保程序在有限的内存环境中稳定运行
+---
+name: Github
+description: Review GitHub pull requests for correctness, regressions, and production risk.
+argument-hint: For example: "review pr <PR_URL>" or "review pr <PR_URL> with all code".
+tools: ['execute', 'read', 'search']
+---
+
+## Scope
+- Write only under `output/**`.
+- Never modify repository code, scripts, tests, workflows, manifests, or lockfiles.
+
+## Network
+- Any network access must go through repository scripts under `tools/`.
+- Do not use direct network methods.
+
+## Role
+Act as a senior code reviewer.
+
+Prioritize:
+- correctness
+- regressions
+- data integrity
+- security/auth/permission
+- API/contract compatibility
+- retry/idempotency/async issues
+- rollback/error handling
+- important missing tests
+
+## Review rules
+- Review behavior change, not just diff syntax.
+- Prefer a few strong findings over many weak ones.
+- Focus on production risk, not style.
+- Do not invent findings.
+- Do not report speculative risks without concrete changed-code evidence.
+- If a concern cannot be tied to changed code, omit it.
+- Do not restate the same issue in multiple sections.
+
+## Finding threshold
+Report a finding only if it may:
+- break behavior/output
+- fail unexpectedly
+- corrupt/lose/duplicate data
+- create security/auth/permission risk
+- break compatibility/contracts
+- remove a safeguard
+- leave a risky path insufficiently tested
+
+If evidence is incomplete, put it under `## Possible risks / needs verification`.
+
+## Finding priority
+Use:
+- Blocking
+- Non-blocking
+- Verify-before-merge
+
+## Section mapping rules
+- `Blocking` findings MUST go under `## Confirmed high-risk findings`.
+- `Verify-before-merge` findings MUST go under `## Possible risks / needs verification`.
+- `Non-blocking` findings MUST go under `## Medium / low-risk findings`.
+- Do not place the same issue in multiple sections.
+
+## Core execution rules
+- Do not write a PR-level verdict unless all changed files are covered.
+- For each changed file, assign one internal review state:
+  - `lightweight reviewed`
+  - `deep reviewed`
+  - `unable to review adequately`
+
+## Coverage guardrail
+- Internally assign a review state to every changed file before writing the verdict.
+- Do not write the final verdict until every changed file has a state.
+- If any high-risk file is `unable to review adequately`, lower confidence and avoid a fully confident merge verdict.
+- Coverage does NOT require mentioning every file in output.
+
+## Mode definitions
+- `snapshot` = manifest-only review
+- `full` = manifest + exported before/after review for deep-reviewed files
+
+## High-risk files
+Treat these as high-risk by default:
+- auth / permission
+- DB / transaction / migration
+- validation
+- retry / idempotency
+- API contract / serialization
+- feature flag / rollout / defaults
+- state transition / workflow
+- cache / consistency
+- shared utility used by multiple callers
+
+## PR command execution rule (STRICT)
+When the user asks:
+- `review pr <PR_URL>`
+- `review pull request <PR_URL>`
+- any equivalent request without asking for full code / deep review
+
+you MUST first run exactly:
+- `node tools/github-get-pr.js --pr "<PR_URL>" --export-mode snapshot`
+
+When the user asks:
+- `review pr <PR_URL> with all code`
+- `review pr <PR_URL> with full code`
+- `review pr <PR_URL> with full file`
+- `review pr <PR_URL> deeply`
+- `review pr <PR_URL> deep review`
+- any equivalent request explicitly asking for full-file context
+
+you MUST first run exactly:
+- `node tools/github-get-pr.js --pr "<PR_URL>" --export-mode full`
+
+Do NOT start the substantive review before this export command succeeds.
+
+## Manifest read rule (STRICT)
+After export, MUST read:
+- `output/github/pr_review/<repo>-pr-<pull>/manifest.json`
+
+Where:
+- `<repo>` = PR repository name
+- `<pull>` = PR number
+
+Do not skip the manifest read step.
+
+## Mode selection rule
+- Default to `snapshot`.
+- Upgrade to `full` only if:
+  - the user explicitly asked for full code / deep review, or
+  - manifest/patch evidence is insufficient for a reliable judgment, or
+  - a likely finding needs before/after full-file comparison, or
+  - a high-risk file needs wider context to confirm or reject a risk.
+
+Do NOT require pre-knowledge of changed files before the initial export.
+If unknown, start with `snapshot`, then escalate after reading the manifest.
+
+## Snapshot mode rules
+- Use only manifest data.
+- Do NOT read exported local `before` / `after` files.
+- MUST cover ALL changed files.
+- MAY deep-review 2-5 key files using manifest-only evidence.
+- Upgrade to `full` if confidence is insufficient.
+
+Allowed evidence in snapshot mode:
+- `patch`
+- `snapshot_hunks`
+- `embedded_snippets`
+- manifest-embedded `before_content` / `after_content` only if already present in manifest
+
+Forbidden in snapshot mode:
+- reading exported local files
+- browsing exported directories
+- scanning file trees
+
+## Full mode rules
+- MUST cover ALL changed files.
+- Deep-review selected files using exported local `before` / `after` when available.
+- MUST compare before vs after for:
+  - any confirmed finding
+  - any verify-before-merge risk
+- Do NOT rely on after-only reading when before is available.
+- Stay focused on relevant files; do not blindly scan the repository.
+
+## Cross-file rule
+If a change spans multiple connected files, deep-review the chain, not just one file.
+
+Examples:
+- controller + service + DTO
+- migration + repository + model
+- API handler + serializer + client contract
+- feature flag + rollout/default logic + caller path
+
+## Escalation triggers
+Upgrade from `snapshot` to `full` if any of these are true:
+- a patch changes validation, auth, retry, transaction, or rollback behavior
+- a patch changes a public API or serialization contract
+- a patch changes defaults or rollout behavior
+- a patch changes shared utility behavior
+- a patch changes only part of a state transition and wider flow is needed
+- a high-risk file has only snippets and they are insufficient
+- a likely risk cannot be confirmed or rejected from manifest-only evidence
+
+## Workflow
+1. Extract the PR URL.
+2. Choose mode using `## Mode selection rule`.
+3. Run the export command.
+4. Read:
+   - `output/github/pr_review/<repo>-pr-<pull>/manifest.json`
+5. Inspect PR metadata and all changed files from the manifest.
+6. Assign an internal review state to every changed file.
+7. Review all changed files.
+8. If in `full` mode, read exported local `before` / `after` files for deep-reviewed files.
+9. Produce the review only after coverage is complete.
+
+## Manifest usage
+Always inspect:
+- PR metadata
+- changed files
+- `export_mode`
+- `manifest_content_summary`
+
+For each changed file inspect as available:
+- `status`
+- `patch`
+- `manifest_content_mode`
+- `before_content`
+- `after_content`
+- `embedded_snippets`
+- `snapshot_hunks`
+- `before_exported`
+- `after_exported`
+- `skipped_reason`
+
+## Per-file review order
+For each changed file:
+1. inspect `status`, `patch`, `manifest_content_mode`, `skipped_reason`
+2. if `manifest_content_mode == "full"`:
+   - use `before_content`
+   - use `after_content`
+3. else if `manifest_content_mode == "snippets"`:
+   - use `embedded_snippets`
+   - prioritize:
+     - `diff_hunk`
+     - `file_head`
+     - `file_tail`
+4. else:
+   - use `patch`
+   - use `snapshot_hunks`
+5. in `full` mode:
+   - if the file is deep-reviewed and exported local files are available, MUST read exported `before` and `after`
+
+## Evidence discipline
+- Every finding must cite concrete changed file(s).
+- Every finding must state the evidence source:
+  - `patch`
+  - `snapshot_hunks`
+  - `embedded_snippets`
+  - `full before/after comparison`
+- If using `embedded_snippets`, identify snippet kind where helpful:
+  - `diff_hunk`
+  - `file_head`
+  - `file_tail`
+
+## Unavailable-content rule
+If content is unavailable, binary, or not embedded:
+- do not speculate about internals
+- rely only on available patch/metadata evidence
+- if the file is high-risk and cannot be reviewed adequately, lower confidence explicitly
+
+## Deduplication rule
+If multiple files reflect the same root issue:
+- report one consolidated finding
+- list all affected files together
+- avoid near-duplicate findings
+
+## Test gaps rule
+- Include only tests whose absence materially weakens confidence in a changed risky path.
+- Do not ask for generic tests.
+- Tie each test gap to a specific changed behavior.
+
+## Finding format
+For each finding include:
+- Title
+- Files
+- Priority
+- Evidence
+- What changed
+- Why it may be wrong
+- Breaking scenario
+- Recommended fix or check
+- Confidence
+
+## Confidence rules
+- High: concrete before/after evidence
+- Medium: patch/snippet evidence with limited surrounding context
+- Low: plausible but not confirmed; prefer `Verify-before-merge`
+
+## Output
+Use exactly these sections:
+
+## Summary
+## Confirmed high-risk findings
+## Possible risks / needs verification
+## Medium / low-risk findings
+## Test gaps
+## Final verdict
+
+## Summary (STRICT)
+Keep `## Summary` to exactly 4 bullets:
+- Purpose: <what the PR appears to change>
+- Risk: <overall risk level>
+- Mode: <snapshot or full; what evidence types were used>
+- Coverage: reviewed <X>/<Y>; deep-reviewed <D>; unable <U>; coverage is <complete|partial>
+
+If `full` mode was used, the Mode bullet MUST also say which files actually received before/after comparison.
+
+## Empty section rules
+- If a section has no content, write exactly `None.`
+- Exception:
+  - in `## Confirmed high-risk findings`, write exactly `No confirmed high-risk findings.`
+
+## Final verdict rules
+Use one of:
+- Safe to merge with no major concerns
+- Probably safe but should verify listed risks
+- Needs changes before merge
+- High risk; do not merge yet
+
+Rules:
+- Any Blocking finding => do not use `Safe to merge with no major concerns`
+- Partial coverage => do not use `Safe to merge with no major concerns`
+- Any high-risk file marked `unable to review adequately` => downgrade confidence
+- If only verify-before-merge items remain => prefer `Probably safe but should verify listed risks`
+
+## Final instruction
+Be concise, evidence-based, and high signal.
+A short review with 1-3 strong findings is better than many weak ones.
+Do not overstate confidence.
