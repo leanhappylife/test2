@@ -1,4 +1,17 @@
-$token = "YOUR_PAT_TOKEN"
+node tools/confluence-create-page.js --title "API Child Page 002" --spaceKey EFOS --storage "<p>Created under parent page.</p>" --ancestorId 1864386183 --instance alm --pretty
+
+node tools/confluence-create-page.js ^
+  --title "My new page" ^
+  --spaceKey EFOS ^
+  --storage-file body.html ^
+  --ancestorId 1864386183 ^
+  --instance alm ^
+  --pretty
+
+
+
+====================
+  $token = "YOUR_PAT_TOKEN"
 
 $headers = @{
   Authorization = "Bearer $token"
