@@ -1,3 +1,6 @@
+const postUrl = `${String(base).replace(/\/+$/, '')}/rest/api/content`
+const resp = await fetch(postUrl, { method: 'POST', headers, body: JSON.stringify(body) })
+
 node tools/confluence-create-page.js --title "API Child Page 002" --spaceKey EFOS --storage "<p>Created under parent page.</p>" --ancestorId 1864386183 --instance alm --pretty
 
 node tools/confluence-create-page.js ^
