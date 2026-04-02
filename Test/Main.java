@@ -1,220 +1,431 @@
----
-name: Github
-description: Review GitHub pull requests for correctness, regressions, and production risk.
-argument-hint: For example: "review pr <PR_URL>" or "review pr <PR_URL> with all code".
-tools: ['execute', 'read', 'search']
----
+You are working in an existing Java project that already uses JSqlParser and already has code for:
+- scanning SQL files
+- extracting routines
+- extracting SQL usage
+- generating relationship_detail.tsv
+- writing TSV / Excel-like outputs
 
-## Scope
-- Write only under `output/**`.
-- Never modify repository code, scripts, tests, workflows, manifests, or lockfiles.
+Please extend the existing project incrementally.
 
-## Network
-- Any network access must go through repository scripts under `tools/`.
-- Do not use direct network methods.
+====================================
+GOAL
+====================================
 
-## Role
-Act as a senior code reviewer.
+Implement ONLY the generation of:
 
-Prioritize:
-- correctness
-- regressions
-- data integrity
-- security/auth/permission
-- API/contract compatibility
-- retry/idempotency/async issues
-- rollback/error handling
-- important missing tests
+- lineage_path.tsv
 
-## Review rules
-- Review behavior change, not just diff syntax.
-- Focus on production risk, not style.
-- Prefer a few strong findings over many weak ones.
-- Do not invent findings.
-- Do not report speculative risks without concrete changed-code evidence.
-- If a concern cannot be tied to changed code, omit it.
-- Do not restate the same issue in multiple sections.
+Assume relationship_detail.tsv generation already exists and is working.
 
-## Command rule (STRICT)
-For any PR review request, run export first before writing the review.
+Do NOT redesign relationship_detail.tsv in this task.
 
-If the user asks:
-- `review pr <PR_URL>`
-- `review pull request <PR_URL>`
-- or equivalent without asking for full code
+The new lineage_path.tsv must be derived from direct relationships, not parsed independently from scratch.
 
-MUST run:
-- `node tools/github-get-pr.js --pr "<PR_URL>" --export-mode snapshot`
+====================================
+KEY DESIGN RULE
+====================================
 
-If the user asks:
-- `review pr <PR_URL> with all code`
-- `review pr <PR_URL> with full code`
-- `review pr <PR_URL> deeply`
-- or equivalent asking for full-file context
+lineage_path.tsv must be built based on relationship_detail.tsv direct edges.
 
-MUST run:
-- `node tools/github-get-pr.js --pr "<PR_URL>" --export-mode full`
+That means:
 
-Do not start substantive review before export succeeds.
+1. relationship_detail.tsv stores direct single-hop relationships
+2. lineage_path.tsv stores propagated multi-hop end-to-end paths
+3. Do NOT duplicate parsing logic unnecessarily if direct relationships already exist
+4. Prefer building lineage from the direct relationship graph
 
-## Manifest rule (STRICT)
-After export, MUST read:
-- `output/github/pr_review/<repo>-pr-<pull>/manifest.json`
+====================================
+WORK IN THIS ORDER
+====================================
 
-Do not skip this step.
+1. Inspect the current project structure first
+2. Inspect the existing relationship_detail.tsv generation logic
+3. Inspect the sample package structure
+4. Inspect expected/lineage_path.tsv
+5. Compare relationship_detail.tsv and expected lineage_path.tsv carefully
+6. Summarize the inferred propagation rules in your own words before implementation
+7. Then implement only lineage_path.tsv generation
 
-## Mode rule
-- Default: `snapshot`
-- Upgrade to `full` only if:
-  - the user explicitly asked for full code / deep review, or
-  - manifest/patch evidence is insufficient, or
-  - a likely finding needs before/after full-file comparison
+====================================
+SAMPLE PACKAGE STRUCTURE
+====================================
 
-Do not require knowing changed files before the initial export.
+Assume the sample package root contains:
 
-## Review coverage rule (STRICT)
-- Cover ALL changed files before giving a PR-level verdict.
-- Internally assign EVERY changed file exactly one review state:
-  - `lightweight reviewed`
-  - `deep reviewed`
-  - `unable to review adequately`
-- No changed file may be left unclassified.
-- If any high-risk file is `unable to review adequately`, lower confidence.
-- Coverage does NOT require mentioning every file in output, but it DOES require reviewing every changed file.
+- table/
+- view/
+- function/
+- sp/
+- extra/
+- expected/
+- docs/
 
-## Change coverage rule (STRICT)
-Every changed file MUST be reviewed.
-Every material changed hunk in a changed file MUST be inspected at least once before the final verdict.
+Typical structure:
 
-This does NOT require:
-- a separate finding for every hunk
-- mentioning every hunk in the output
+sample_case_verified/
+  table/
+    CCL.CODE_MAP.sql
+    FOS.API_MTM_REVAL.sql
+    INTERFACE.API_MTM_REVAL.sql
+    INTERFACE.API_MTM_REVAL_STAR.sql
+    RPT.MTM_REVAL_AUDIT.sql
+    INTERFACE.MTM_REVAL_HIST.sql
+    INTERFACE.MTM_REVAL_TMP_COPY.sql
+    TABLE_A.sql
+    TABLE_B.sql
+    TABLE_C.sql
+  view/
+    INTERFACE.V_API_MTM_REVAL.sql
+  function/
+    INTERFACE.FN_GET_CODE_MAP_VALUE.sql
+    INTERFACE.FN_REL_DEMO.sql
+  sp/
+    RPT.PR_AUDIT_MTM_REVAL.sql
+    INTERFACE.PI_API_MTM_REVAL_DEMO.sql
+    INTERFACE.PI_GRAPH_DEMO.sql
+  extra/
+    extra_patterns.sql
+  expected/
+    relationship_detail.tsv
+    lineage_path.tsv
+  docs/
+    relationship_list_with_samples.md
 
-But it DOES require:
-- no material changed hunk may be ignored
-- no PR verdict may be written after reviewing only selected hunks from a file
-- a file is NOT considered reviewed if only its filename, summary, or one partial snippet was inspected while other material changed hunks in that file were skipped without justification
+====================================
+NEW MAIN
+====================================
 
-## Non-high-risk file rule (STRICT)
-Do NOT review only high-risk files and stop.
-Low-risk and low-value changed files MUST still receive review coverage.
+Add a new main class, for example:
 
-For every changed file, the reviewer MUST do one of:
-- `deep reviewed`
-- `lightweight reviewed`
-- `unable to review adequately`
+org.example.sqlusagechecker.SampleLineagePathMain
 
-Allowed lightweight cases include:
-- docs
-- lock files
-- generated files
-- rename-only or move-only files with no material behavior change
-- formatting-only or mechanical edits with no behavior signal
+This main must accept:
 
-But even in those cases, the file MUST still be inspected and assigned a review state.
-Do NOT silently skip low-risk files.
+--relationshipDetail <path>
+--outputDir <path>
 
-## Snapshot rule
-- Use manifest-only evidence.
-- Do NOT read exported local `before` / `after` files.
-- MUST still cover all changed files.
-- MUST inspect all material changed hunks using manifest-based evidence.
-- MUST assign a review state to every changed file, including low-risk files.
+Optional:
+--expectedLineagePath <path>
 
-Allowed evidence:
-- `patch`
-- `snapshot_hunks`
-- `embedded_snippets`
-- manifest `before_content` / `after_content` if already embedded
+Optional convenience mode:
+- if the project already has a main that generates relationship_detail.tsv first,
+  you may also support passing directories and reusing the generated relationship_detail.tsv,
+  but the core logic of lineage_path.tsv must still be based on direct relationships.
 
-Forbidden in snapshot mode:
-- reading exported local files
-- browsing exported directories
-- scanning file trees
+====================================
+SCOPE LIMIT
+====================================
 
-## Full rule
-- Cover all changed files.
-- For any deep-reviewed file with exported local files available, read both `before` and `after`.
-- Any confirmed finding or verify-before-merge risk in full mode MUST be supported by before/after comparison when available.
-- Do not rely on after-only reading when before is available.
-- If a file has multiple material changed hunks relevant to a risky behavior chain, inspect the whole chain before concluding.
-- Low-risk files may remain lightweight reviewed, but they still MUST be inspected and assigned a state.
+Implement ONLY lineage_path.tsv in this task.
 
-## Escalate to full if
-- validation / auth / retry / transaction / rollback logic changed
-- API contract / serialization changed
-- defaults / rollout / feature-flag behavior changed
-- shared utility behavior changed
-- state-transition flow needs wider context
-- manifest snippets are insufficient
-- some material changed hunks cannot be inspected adequately in snapshot mode
-- a changed file cannot be responsibly classified from manifest-only evidence
+Do NOT redesign relationship_detail.tsv.
+Do NOT re-parse everything from scratch if the direct relationships are already available.
+Do NOT redesign the whole project.
+Prefer minimal invasive changes.
 
-## Workflow
-1. Extract PR URL.
-2. Choose mode.
-3. Run export command.
-4. Read manifest.
-5. Enumerate all changed files.
-6. Assign an initial review priority to every changed file:
-   - high
-   - medium
-   - low
-7. Review all changed files.
-8. Inspect all material changed hunks.
-9. Deep-review risky files as needed.
-10. Before writing the verdict, confirm every changed file has one review state.
-11. Write the review only after coverage is complete.
+====================================
+OUTPUT COLUMNS
+====================================
 
-## Per-file minimum requirement
-A changed file may be marked `lightweight reviewed` only if:
-- its material changed hunks were inspected, and
-- no concrete risk signal requiring deeper review was found
+lineage_path.tsv must contain these columns in this exact order:
 
-A changed file MUST be upgraded to `deep reviewed` if:
-- it is high-risk, or
-- it participates in a risky multi-file chain, or
-- manifest evidence is insufficient for confident judgment, or
-- a likely finding depends on wider context
+root_source_object
+root_source_field
+final_target_object
+final_target_field
+path
+hop_count
+path_relationship
+confidence
 
-## Output
-Use exactly these sections:
+====================================
+CORE RULES
+====================================
 
-## Summary
-## Confirmed high-risk findings
-## Possible risks / needs verification
-## Medium / low-risk findings
-## Test gaps
-## Final verdict
+1. lineage_path.tsv stores propagated end-to-end lineage paths
+2. one final path = one row
+3. one root source may produce multiple lineage rows
+4. if the same final target is reached through different paths, keep both rows
+5. do NOT collapse distinct paths into one row
+6. lineage_path.tsv is path-based, not direct-edge-based
 
-## Summary rule
-Keep `## Summary` to 4 bullets:
-- Purpose
-- Risk
-- Mode
-- Coverage: reviewed <X>/<Y>; deep-reviewed <D>; lightweight-reviewed <L>; unable <U>; coverage is <complete|partial>
+====================================
+path_relationship RULE
+====================================
 
-If full mode was used, say which files actually received before/after comparison.
+Use only:
 
-## Empty section rule
-- If a section has no content, write exactly `None.`
-- Exception:
-  - in `## Confirmed high-risk findings`, write exactly `No confirmed high-risk findings.`
+- PROPAGATED_LINEAGE
 
-## Final verdict rule
-Use one of:
-- Safe to merge with no major concerns
-- Probably safe but should verify listed risks
-- Needs changes before merge
-- High risk; do not merge yet
+====================================
+PATH STRING RULE
+====================================
+
+The path column must store the full endpoint chain in this format:
+
+OBJECT.FIELD -> OBJECT.FIELD -> OBJECT.FIELD
+
+Examples:
+
+FOS.API_MTM_REVAL.CUSTOMER_NUMBER -> INTERFACE.V_API_MTM_REVAL.CUST_NUM
+
+INTERFACE.V_API_MTM_REVAL.CUST_NUM -> BASE_DATA.CUST_NUM -> SESSION.T_MTM_STAGE.CUST_NUM
+
+SESSION.T_GRAPH_STAGE.COL_A -> TABLE_A.COL_A -> TABLE_C.COL_C -> TABLE_B.COL_B
 
 Rules:
-- Any Blocking finding => not Safe
-- Partial coverage => not Safe
-- High-risk file not adequately reviewed => downgrade confidence
-- Any changed file without a review state => no PR-level verdict allowed
+- use full object name + field name
+- use ` -> ` exactly
+- preserve the path order from root source to final target
 
-## Final instruction
-Be concise, evidence-based, and high signal.
-Do not let low-risk files disappear from coverage.
-A short review with 1-3 strong findings is better than many weak ones, but only after complete file coverage is achieved.
+====================================
+hop_count RULE
+====================================
+
+hop_count = number of arrows in the path
+
+Examples:
+
+A.x -> B.y
+hop_count = 1
+
+A.x -> B.y -> C.z
+hop_count = 2
+
+A.x -> B.y -> C.z -> D.w
+hop_count = 3
+
+====================================
+CONFIDENCE RULE
+====================================
+
+For now, confidence may be inherited conservatively from the direct relationships involved.
+
+Recommended rule:
+- if all edges in the path are PARSER, path confidence = PARSER
+- otherwise if any edge is REGEX and none are DYNAMIC_LOW_CONFIDENCE, path confidence = REGEX
+- if any edge is DYNAMIC_LOW_CONFIDENCE, path confidence = DYNAMIC_LOW_CONFIDENCE
+
+Document the rule clearly in code comments.
+
+====================================
+IMPORTANT IMPLEMENTATION RULE
+====================================
+
+Not every relationship type in relationship_detail.tsv should be used as a propagation edge.
+
+Only use field-to-field propagating relationships as lineage graph edges.
+
+At minimum, these relationship types should be treated as propagation edges:
+
+- CREATE_VIEW_MAP
+- INSERT_SELECT_MAP
+- UPDATE_SET_MAP
+- MERGE_SET_MAP
+- MERGE_INSERT_MAP
+
+Optionally include:
+- RETURN_VALUE
+- parameter propagation
+only if the current direct relationship model already represents them safely
+
+Do NOT use these as propagation edges by default:
+- SELECT_TABLE
+- SELECT_VIEW
+- INSERT_TABLE
+- UPDATE_TABLE
+- DELETE_TABLE
+- DELETE_VIEW
+- GROUP_BY
+- HAVING
+- ORDER_BY
+- UNKNOWN
+- CREATE_TABLE
+- CTE_DEFINE
+- UNION_INPUT
+
+These may still exist in relationship_detail.tsv for usage/audit purposes, but should not automatically become field-lineage edges.
+
+====================================
+EDGE EXTRACTION RULE
+====================================
+
+Build the lineage graph from direct relationships.
+
+Each graph edge should represent:
+
+source endpoint -> target endpoint
+
+Prefer using:
+- source_object / source_field
+- target_object / target_field
+
+If a row does not clearly define both source and target field endpoints, do not force it into the lineage graph.
+
+Do not invent missing source fields.
+
+====================================
+ROOT SOURCE RULE
+====================================
+
+A root source is any field endpoint that has outgoing propagating edges and no incoming propagating edge in the same graph,
+or any endpoint that should be treated as a lineage start for the sample.
+
+Examples from sample:
+- FOS.API_MTM_REVAL.CUSTOMER_NUMBER
+- FOS.API_MTM_REVAL.DEAL_NUMBER
+- FOS.API_MTM_REVAL.DEAL_TYPE
+- FOS.API_MTM_REVAL.MTM_AMOUNT
+- FOS.API_MTM_REVAL.LAST_UPDATE_TS
+- SESSION.T_GRAPH_STAGE.COL_A
+
+====================================
+FINAL TARGET RULE
+====================================
+
+A final target is any field endpoint that:
+- is reachable in the propagation graph
+- and has no outgoing propagating edge
+or is otherwise considered a terminal persistent destination
+
+Examples:
+- INTERFACE.API_MTM_REVAL.CUST_NUM
+- INTERFACE.API_MTM_REVAL_STAR.CUST_NUM
+- INTERFACE.V_API_MTM_REVAL.CUST_NUM
+- RPT.MTM_REVAL_AUDIT.CUST_NUM
+- TABLE_B.COL_B
+
+====================================
+MULTI-PATH RULE
+====================================
+
+If the same final target is reachable through two distinct paths, both rows must be preserved.
+
+Graph example:
+
+SESSION.T_GRAPH_STAGE.COL_A -> TABLE_A.COL_A
+SESSION.T_GRAPH_STAGE.COL_A -> TABLE_B.COL_B
+TABLE_A.COL_A -> TABLE_C.COL_C
+TABLE_C.COL_C -> TABLE_B.COL_B
+
+Then lineage_path.tsv must include both:
+
+SESSION.T_GRAPH_STAGE.COL_A -> TABLE_B.COL_B
+SESSION.T_GRAPH_STAGE.COL_A -> TABLE_A.COL_A -> TABLE_C.COL_C -> TABLE_B.COL_B
+
+This is required and is not duplication.
+
+====================================
+SAMPLE EXPECTATIONS
+====================================
+
+The implementation must support these path patterns from the sample:
+
+1. View mapping:
+FOS.API_MTM_REVAL.CUSTOMER_NUMBER -> INTERFACE.V_API_MTM_REVAL.CUST_NUM
+
+2. View -> CTE -> Session path:
+INTERFACE.V_API_MTM_REVAL.CUST_NUM -> BASE_DATA.CUST_NUM -> SESSION.T_MTM_STAGE.CUST_NUM
+
+3. Session -> target table:
+SESSION.T_MTM_STAGE.CUST_NUM -> INTERFACE.API_MTM_REVAL.CUST_NUM
+
+4. Session -> target view:
+SESSION.T_MTM_STAGE.CUST_NUM -> INTERFACE.V_API_MTM_REVAL.CUST_NUM
+
+5. Session_all -> select star target:
+SESSION.T_MTM_STAGE_ALL.CUST_NUM -> INTERFACE.API_MTM_REVAL_STAR.CUST_NUM
+
+6. Graph multi-path case:
+SESSION.T_GRAPH_STAGE.COL_A -> TABLE_B.COL_B
+SESSION.T_GRAPH_STAGE.COL_A -> TABLE_A.COL_A -> TABLE_C.COL_C -> TABLE_B.COL_B
+
+7. Audit path if represented safely in direct relationships:
+SESSION.T_MTM_STAGE.CUST_NUM -> RPT.MTM_REVAL_AUDIT.CUST_NUM
+SESSION.T_MTM_STAGE.DEAL_NUM -> RPT.MTM_REVAL_AUDIT.DEAL_NUM
+
+8. Longer propagated paths:
+FOS.API_MTM_REVAL.CUSTOMER_NUMBER -> INTERFACE.V_API_MTM_REVAL.CUST_NUM -> BASE_DATA.CUST_NUM -> SESSION.T_MTM_STAGE.CUST_NUM -> SESSION.T_MTM_STAGE_ALL.CUST_NUM -> INTERFACE.API_MTM_REVAL_STAR.CUST_NUM
+
+====================================
+CYCLE SAFETY RULE
+====================================
+
+Protect against cycles.
+
+Requirements:
+- do not allow infinite recursion
+- keep a visited-path strategy, not just visited-node globally
+- distinct paths should still be preserved when valid
+- stop path expansion when the next endpoint would repeat a node already in the current path
+
+====================================
+EXPECTED IMPLEMENTATION BEHAVIOR
+====================================
+
+Before implementation:
+- inspect reusable existing classes
+- inspect current relationship_detail.tsv generation logic
+- inspect docs/relationship_list_with_samples.md
+- inspect expected/lineage_path.tsv
+- summarize the inferred propagation rules
+
+During implementation:
+- reuse existing graph / chain / expander logic if already present
+- add only minimal helper/service changes required
+- add a dedicated new main for this task
+- keep unsupported cases explicit
+
+After implementation:
+- write lineage_path.tsv to outputDir
+- optionally compare it with expected/lineage_path.tsv
+- report mismatches clearly
+
+====================================
+DELIVERABLES
+====================================
+
+Please implement:
+
+1. a new main class for lineage_path generation
+2. minimal supporting changes required
+3. reuse current chain / graph / writer logic as much as possible
+4. build lineage_path.tsv from relationship_detail.tsv direct relationships
+5. add tests if practical
+6. if expected file comparison is easy, add a lightweight comparison mode
+
+====================================
+IMPLEMENTATION STYLE
+====================================
+
+- inspect the current code first
+- prefer incremental enhancement
+- avoid broad refactors
+- keep package structure consistent
+- write readable code
+- add comments only where useful
+- keep unsupported cases explicit
+
+====================================
+PHASED APPROACH
+====================================
+
+Implement in phases:
+
+Phase 1:
+- inspect current structure and reusable chain/graph components
+- identify which direct relationship rows become propagation edges
+
+Phase 2:
+- load relationship_detail.tsv
+- build field-level graph edges
+
+Phase 3:
+- identify roots and terminal targets
+- expand paths with cycle protection
+
+Phase 4:
+- generate lineage_path.tsv
+- compare with expected/lineage_path.tsv and refine mismatches
+
+Do not redesign relationship_detail.tsv in this task.
