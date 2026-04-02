@@ -1,431 +1,216 @@
-You are working in an existing Java project that already uses JSqlParser and already has code for:
-- scanning SQL files
-- extracting routines
-- extracting SQL usage
-- generating relationship_detail.tsv
-- writing TSV / Excel-like outputs
+Please fix the existing relationship_detail.tsv generation logic in the current Java project.
 
-Please extend the existing project incrementally.
+Do NOT redesign the whole project.
+Do NOT change the overall TSV structure.
+Make the minimum targeted code changes needed.
 
 ====================================
 GOAL
 ====================================
 
-Implement ONLY the generation of:
+Fix the implementation for these two cases:
 
-- lineage_path.tsv
-
-Assume relationship_detail.tsv generation already exists and is working.
-
-Do NOT redesign relationship_detail.tsv in this task.
-
-The new lineage_path.tsv must be derived from direct relationships, not parsed independently from scratch.
+1. SELECT_EXPR line_content must preserve the exact original SQL source line
+2. RETURN_VALUE must support multiple direct dependencies for the same return line
 
 ====================================
-KEY DESIGN RULE
+CASE 1: SELECT_EXPR line_content must preserve exact raw source line
 ====================================
 
-lineage_path.tsv must be built based on relationship_detail.tsv direct edges.
+Problem:
+For function INTERFACE.FN_REL_DEMO, line 12 currently loses the trailing `||` or otherwise simplifies the SQL line.
 
-That means:
+Expected behavior:
+line_content must always be the exact raw original source line from the SQL file, retrieved by line_no.
 
-1. relationship_detail.tsv stores direct single-hop relationships
-2. lineage_path.tsv stores propagated multi-hop end-to-end paths
-3. Do NOT duplicate parsing logic unnecessarily if direct relationships already exist
-4. Prefer building lineage from the direct relationship graph
+For this SQL:
 
-====================================
-WORK IN THIS ORDER
-====================================
+    SET V_OUT = (
+        SELECT TRIM(V.CUST_NUM) || '-' ||
+               INTERFACE.FN_GET_CODE_MAP_VALUE('MTM','STATUS','DEFAULT','A','B')
+        FROM INTERFACE.V_API_MTM_REVAL V
+        WHERE V.CUST_NUM = P_CUST_NUM
+        FETCH FIRST 1 ROW ONLY
+    );
 
-1. Inspect the current project structure first
-2. Inspect the existing relationship_detail.tsv generation logic
-3. Inspect the sample package structure
-4. Inspect expected/lineage_path.tsv
-5. Compare relationship_detail.tsv and expected lineage_path.tsv carefully
-6. Summarize the inferred propagation rules in your own words before implementation
-7. Then implement only lineage_path.tsv generation
+The SELECT_EXPR row for line 12 must use exactly:
 
-====================================
-SAMPLE PACKAGE STRUCTURE
-====================================
-
-Assume the sample package root contains:
-
-- table/
-- view/
-- function/
-- sp/
-- extra/
-- expected/
-- docs/
-
-Typical structure:
-
-sample_case_verified/
-  table/
-    CCL.CODE_MAP.sql
-    FOS.API_MTM_REVAL.sql
-    INTERFACE.API_MTM_REVAL.sql
-    INTERFACE.API_MTM_REVAL_STAR.sql
-    RPT.MTM_REVAL_AUDIT.sql
-    INTERFACE.MTM_REVAL_HIST.sql
-    INTERFACE.MTM_REVAL_TMP_COPY.sql
-    TABLE_A.sql
-    TABLE_B.sql
-    TABLE_C.sql
-  view/
-    INTERFACE.V_API_MTM_REVAL.sql
-  function/
-    INTERFACE.FN_GET_CODE_MAP_VALUE.sql
-    INTERFACE.FN_REL_DEMO.sql
-  sp/
-    RPT.PR_AUDIT_MTM_REVAL.sql
-    INTERFACE.PI_API_MTM_REVAL_DEMO.sql
-    INTERFACE.PI_GRAPH_DEMO.sql
-  extra/
-    extra_patterns.sql
-  expected/
-    relationship_detail.tsv
-    lineage_path.tsv
-  docs/
-    relationship_list_with_samples.md
-
-====================================
-NEW MAIN
-====================================
-
-Add a new main class, for example:
-
-org.example.sqlusagechecker.SampleLineagePathMain
-
-This main must accept:
-
---relationshipDetail <path>
---outputDir <path>
-
-Optional:
---expectedLineagePath <path>
-
-Optional convenience mode:
-- if the project already has a main that generates relationship_detail.tsv first,
-  you may also support passing directories and reusing the generated relationship_detail.tsv,
-  but the core logic of lineage_path.tsv must still be based on direct relationships.
-
-====================================
-SCOPE LIMIT
-====================================
-
-Implement ONLY lineage_path.tsv in this task.
-
-Do NOT redesign relationship_detail.tsv.
-Do NOT re-parse everything from scratch if the direct relationships are already available.
-Do NOT redesign the whole project.
-Prefer minimal invasive changes.
-
-====================================
-OUTPUT COLUMNS
-====================================
-
-lineage_path.tsv must contain these columns in this exact order:
-
-root_source_object
-root_source_field
-final_target_object
-final_target_field
-path
-hop_count
-path_relationship
-confidence
-
-====================================
-CORE RULES
-====================================
-
-1. lineage_path.tsv stores propagated end-to-end lineage paths
-2. one final path = one row
-3. one root source may produce multiple lineage rows
-4. if the same final target is reached through different paths, keep both rows
-5. do NOT collapse distinct paths into one row
-6. lineage_path.tsv is path-based, not direct-edge-based
-
-====================================
-path_relationship RULE
-====================================
-
-Use only:
-
-- PROPAGATED_LINEAGE
-
-====================================
-PATH STRING RULE
-====================================
-
-The path column must store the full endpoint chain in this format:
-
-OBJECT.FIELD -> OBJECT.FIELD -> OBJECT.FIELD
-
-Examples:
-
-FOS.API_MTM_REVAL.CUSTOMER_NUMBER -> INTERFACE.V_API_MTM_REVAL.CUST_NUM
-
-INTERFACE.V_API_MTM_REVAL.CUST_NUM -> BASE_DATA.CUST_NUM -> SESSION.T_MTM_STAGE.CUST_NUM
-
-SESSION.T_GRAPH_STAGE.COL_A -> TABLE_A.COL_A -> TABLE_C.COL_C -> TABLE_B.COL_B
+        SELECT TRIM(V.CUST_NUM) || '-' ||
 
 Rules:
-- use full object name + field name
-- use ` -> ` exactly
-- preserve the path order from root source to final target
+- do not reconstruct line_content from AST
+- do not trim leading spaces
+- do not remove commas
+- do not remove semicolons
+- do not remove trailing operators like `||`
+- always load line_content directly from the original source file by line_no
+
+Please inspect where line_content is currently derived and replace that logic with exact source-line lookup.
 
 ====================================
-hop_count RULE
+CASE 2: RETURN_VALUE must support multiple direct dependencies
 ====================================
 
-hop_count = number of arrows in the path
+Problem:
+For function INTERFACE.FN_REL_DEMO, the return line is:
 
-Examples:
+    RETURN V_OUT;
 
-A.x -> B.y
-hop_count = 1
-
-A.x -> B.y -> C.z
-hop_count = 2
-
-A.x -> B.y -> C.z -> D.w
-hop_count = 3
-
-====================================
-CONFIDENCE RULE
-====================================
-
-For now, confidence may be inherited conservatively from the direct relationships involved.
-
-Recommended rule:
-- if all edges in the path are PARSER, path confidence = PARSER
-- otherwise if any edge is REGEX and none are DYNAMIC_LOW_CONFIDENCE, path confidence = REGEX
-- if any edge is DYNAMIC_LOW_CONFIDENCE, path confidence = DYNAMIC_LOW_CONFIDENCE
-
-Document the rule clearly in code comments.
-
-====================================
-IMPORTANT IMPLEMENTATION RULE
-====================================
-
-Not every relationship type in relationship_detail.tsv should be used as a propagation edge.
-
-Only use field-to-field propagating relationships as lineage graph edges.
-
-At minimum, these relationship types should be treated as propagation edges:
-
-- CREATE_VIEW_MAP
-- INSERT_SELECT_MAP
-- UPDATE_SET_MAP
-- MERGE_SET_MAP
-- MERGE_INSERT_MAP
-
-Optionally include:
-- RETURN_VALUE
-- parameter propagation
-only if the current direct relationship model already represents them safely
-
-Do NOT use these as propagation edges by default:
-- SELECT_TABLE
-- SELECT_VIEW
-- INSERT_TABLE
-- UPDATE_TABLE
-- DELETE_TABLE
-- DELETE_VIEW
-- GROUP_BY
-- HAVING
-- ORDER_BY
-- UNKNOWN
-- CREATE_TABLE
-- CTE_DEFINE
-- UNION_INPUT
-
-These may still exist in relationship_detail.tsv for usage/audit purposes, but should not automatically become field-lineage edges.
-
-====================================
-EDGE EXTRACTION RULE
-====================================
-
-Build the lineage graph from direct relationships.
-
-Each graph edge should represent:
-
-source endpoint -> target endpoint
-
-Prefer using:
-- source_object / source_field
-- target_object / target_field
-
-If a row does not clearly define both source and target field endpoints, do not force it into the lineage graph.
-
-Do not invent missing source fields.
-
-====================================
-ROOT SOURCE RULE
-====================================
-
-A root source is any field endpoint that has outgoing propagating edges and no incoming propagating edge in the same graph,
-or any endpoint that should be treated as a lineage start for the sample.
-
-Examples from sample:
-- FOS.API_MTM_REVAL.CUSTOMER_NUMBER
-- FOS.API_MTM_REVAL.DEAL_NUMBER
-- FOS.API_MTM_REVAL.DEAL_TYPE
-- FOS.API_MTM_REVAL.MTM_AMOUNT
-- FOS.API_MTM_REVAL.LAST_UPDATE_TS
-- SESSION.T_GRAPH_STAGE.COL_A
-
-====================================
-FINAL TARGET RULE
-====================================
-
-A final target is any field endpoint that:
-- is reachable in the propagation graph
-- and has no outgoing propagating edge
-or is otherwise considered a terminal persistent destination
-
-Examples:
-- INTERFACE.API_MTM_REVAL.CUST_NUM
-- INTERFACE.API_MTM_REVAL_STAR.CUST_NUM
+But V_OUT is assigned from an expression that depends on two direct sources:
 - INTERFACE.V_API_MTM_REVAL.CUST_NUM
-- RPT.MTM_REVAL_AUDIT.CUST_NUM
-- TABLE_B.COL_B
+- INTERFACE.FN_GET_CODE_MAP_VALUE(...)
+
+Expected behavior:
+Generate two RETURN_VALUE rows for the same line_no = 19.
+
+Both rows should target the current function return value, for example:
+- target_object_type = FUNCTION
+- target_object = INTERFACE.FN_REL_DEMO
+- target_field = RETURN_VALUE
+
+And they should differ by dependency source:
+
+Row 1:
+- source_field = CUST_NUM
+- target_object_type = FUNCTION
+- target_object = INTERFACE.FN_REL_DEMO
+- target_field = RETURN_VALUE
+- relationship = RETURN_VALUE
+- line_no = 19
+- line_content = exact raw source line: "    RETURN V_OUT;"
+- persistent_impact_objects = empty
+- intermediate_objects = INTERFACE.V_API_MTM_REVAL.CUST_NUM
+
+Row 2:
+- source_field = empty
+- target_object_type = FUNCTION
+- target_object = INTERFACE.FN_REL_DEMO
+- target_field = RETURN_VALUE
+- relationship = RETURN_VALUE
+- line_no = 19
+- line_content = exact raw source line: "    RETURN V_OUT;"
+- persistent_impact_objects = empty
+- intermediate_objects = INTERFACE.FN_GET_CODE_MAP_VALUE
+
+Meaning:
+A single RETURN statement may emit multiple direct relationship rows if the returned variable/expression has multiple direct dependencies.
 
 ====================================
-MULTI-PATH RULE
+IMPORTANT RULES
 ====================================
 
-If the same final target is reachable through two distinct paths, both rows must be preserved.
-
-Graph example:
-
-SESSION.T_GRAPH_STAGE.COL_A -> TABLE_A.COL_A
-SESSION.T_GRAPH_STAGE.COL_A -> TABLE_B.COL_B
-TABLE_A.COL_A -> TABLE_C.COL_C
-TABLE_C.COL_C -> TABLE_B.COL_B
-
-Then lineage_path.tsv must include both:
-
-SESSION.T_GRAPH_STAGE.COL_A -> TABLE_B.COL_B
-SESSION.T_GRAPH_STAGE.COL_A -> TABLE_A.COL_A -> TABLE_C.COL_C -> TABLE_B.COL_B
-
-This is required and is not duplication.
+1. relationship_detail.tsv remains direct single-hop only
+2. one direct dependency = one row
+3. same source_object and same line_no may validly produce multiple rows
+4. for RETURN_VALUE, this is expected and correct
+5. do not collapse multiple direct dependencies into one row
+6. do not remove the current sorting rule:
+   - same source_object should be ordered by line_no ascending
 
 ====================================
-SAMPLE EXPECTATIONS
+EXPECTED FN_REL_DEMO RESULT
 ====================================
 
-The implementation must support these path patterns from the sample:
+For INTERFACE.FN_REL_DEMO, the expected rows should be:
 
-1. View mapping:
-FOS.API_MTM_REVAL.CUSTOMER_NUMBER -> INTERFACE.V_API_MTM_REVAL.CUST_NUM
+1.
+source_object_type = FUNCTION
+source_object = INTERFACE.FN_REL_DEMO
+source_field = CUST_NUM
+target_object_type = VIEW
+target_object = INTERFACE.V_API_MTM_REVAL
+target_field = CUST_NUM
+relationship = SELECT_EXPR
+line_no = 12
+line_content = "        SELECT TRIM(V.CUST_NUM) || '-' ||"
+persistent_impact_objects = empty
+intermediate_objects = empty
+confidence = PARSER
 
-2. View -> CTE -> Session path:
-INTERFACE.V_API_MTM_REVAL.CUST_NUM -> BASE_DATA.CUST_NUM -> SESSION.T_MTM_STAGE.CUST_NUM
+2.
+source_object_type = FUNCTION
+source_object = INTERFACE.FN_REL_DEMO
+source_field = empty
+target_object_type = FUNCTION
+target_object = INTERFACE.FN_GET_CODE_MAP_VALUE
+target_field = empty
+relationship = CALL_FUNCTION
+line_no = 13
+line_content = "               INTERFACE.FN_GET_CODE_MAP_VALUE('MTM','STATUS','DEFAULT','A','B')"
+persistent_impact_objects = empty
+intermediate_objects = empty
+confidence = PARSER
 
-3. Session -> target table:
-SESSION.T_MTM_STAGE.CUST_NUM -> INTERFACE.API_MTM_REVAL.CUST_NUM
+3.
+source_object_type = FUNCTION
+source_object = INTERFACE.FN_REL_DEMO
+source_field = empty
+target_object_type = VIEW
+target_object = INTERFACE.V_API_MTM_REVAL
+target_field = empty
+relationship = SELECT_VIEW
+line_no = 14
+line_content = "        FROM INTERFACE.V_API_MTM_REVAL V"
+persistent_impact_objects = empty
+intermediate_objects = empty
+confidence = PARSER
 
-4. Session -> target view:
-SESSION.T_MTM_STAGE.CUST_NUM -> INTERFACE.V_API_MTM_REVAL.CUST_NUM
+4.
+source_object_type = FUNCTION
+source_object = INTERFACE.FN_REL_DEMO
+source_field = CUST_NUM
+target_object_type = VIEW
+target_object = INTERFACE.V_API_MTM_REVAL
+target_field = CUST_NUM
+relationship = WHERE
+line_no = 15
+line_content = "        WHERE V.CUST_NUM = P_CUST_NUM"
+persistent_impact_objects = empty
+intermediate_objects = empty
+confidence = PARSER
 
-5. Session_all -> select star target:
-SESSION.T_MTM_STAGE_ALL.CUST_NUM -> INTERFACE.API_MTM_REVAL_STAR.CUST_NUM
+5.
+source_object_type = FUNCTION
+source_object = INTERFACE.FN_REL_DEMO
+source_field = CUST_NUM
+target_object_type = FUNCTION
+target_object = INTERFACE.FN_REL_DEMO
+target_field = RETURN_VALUE
+relationship = RETURN_VALUE
+line_no = 19
+line_content = "    RETURN V_OUT;"
+persistent_impact_objects = empty
+intermediate_objects = INTERFACE.V_API_MTM_REVAL.CUST_NUM
+confidence = PARSER
 
-6. Graph multi-path case:
-SESSION.T_GRAPH_STAGE.COL_A -> TABLE_B.COL_B
-SESSION.T_GRAPH_STAGE.COL_A -> TABLE_A.COL_A -> TABLE_C.COL_C -> TABLE_B.COL_B
-
-7. Audit path if represented safely in direct relationships:
-SESSION.T_MTM_STAGE.CUST_NUM -> RPT.MTM_REVAL_AUDIT.CUST_NUM
-SESSION.T_MTM_STAGE.DEAL_NUM -> RPT.MTM_REVAL_AUDIT.DEAL_NUM
-
-8. Longer propagated paths:
-FOS.API_MTM_REVAL.CUSTOMER_NUMBER -> INTERFACE.V_API_MTM_REVAL.CUST_NUM -> BASE_DATA.CUST_NUM -> SESSION.T_MTM_STAGE.CUST_NUM -> SESSION.T_MTM_STAGE_ALL.CUST_NUM -> INTERFACE.API_MTM_REVAL_STAR.CUST_NUM
+6.
+source_object_type = FUNCTION
+source_object = INTERFACE.FN_REL_DEMO
+source_field = empty
+target_object_type = FUNCTION
+target_object = INTERFACE.FN_REL_DEMO
+target_field = RETURN_VALUE
+relationship = RETURN_VALUE
+line_no = 19
+line_content = "    RETURN V_OUT;"
+persistent_impact_objects = empty
+intermediate_objects = INTERFACE.FN_GET_CODE_MAP_VALUE
+confidence = PARSER
 
 ====================================
-CYCLE SAFETY RULE
+IMPLEMENTATION INSTRUCTIONS
 ====================================
 
-Protect against cycles.
+Please:
+1. inspect the existing line_content generation logic
+2. inspect the existing RETURN_VALUE extraction logic
+3. make only the minimum code changes required
+4. keep existing package structure
+5. preserve current TSV column order
+6. preserve sorting by source_object and line_no
+7. add or update tests if practical
 
-Requirements:
-- do not allow infinite recursion
-- keep a visited-path strategy, not just visited-node globally
-- distinct paths should still be preserved when valid
-- stop path expansion when the next endpoint would repeat a node already in the current path
-
-====================================
-EXPECTED IMPLEMENTATION BEHAVIOR
-====================================
-
-Before implementation:
-- inspect reusable existing classes
-- inspect current relationship_detail.tsv generation logic
-- inspect docs/relationship_list_with_samples.md
-- inspect expected/lineage_path.tsv
-- summarize the inferred propagation rules
-
-During implementation:
-- reuse existing graph / chain / expander logic if already present
-- add only minimal helper/service changes required
-- add a dedicated new main for this task
-- keep unsupported cases explicit
-
-After implementation:
-- write lineage_path.tsv to outputDir
-- optionally compare it with expected/lineage_path.tsv
-- report mismatches clearly
-
-====================================
-DELIVERABLES
-====================================
-
-Please implement:
-
-1. a new main class for lineage_path generation
-2. minimal supporting changes required
-3. reuse current chain / graph / writer logic as much as possible
-4. build lineage_path.tsv from relationship_detail.tsv direct relationships
-5. add tests if practical
-6. if expected file comparison is easy, add a lightweight comparison mode
-
-====================================
-IMPLEMENTATION STYLE
-====================================
-
-- inspect the current code first
-- prefer incremental enhancement
-- avoid broad refactors
-- keep package structure consistent
-- write readable code
-- add comments only where useful
-- keep unsupported cases explicit
-
-====================================
-PHASED APPROACH
-====================================
-
-Implement in phases:
-
-Phase 1:
-- inspect current structure and reusable chain/graph components
-- identify which direct relationship rows become propagation edges
-
-Phase 2:
-- load relationship_detail.tsv
-- build field-level graph edges
-
-Phase 3:
-- identify roots and terminal targets
-- expand paths with cycle protection
-
-Phase 4:
-- generate lineage_path.tsv
-- compare with expected/lineage_path.tsv and refine mismatches
-
-Do not redesign relationship_detail.tsv in this task.
+At the end, explain:
+- which classes you changed
+- how exact source-line retrieval now works
+- how multiple RETURN_VALUE dependencies are emitted
