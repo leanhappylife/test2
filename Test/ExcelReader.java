@@ -1,315 +1,236 @@
----
-name: Github
-description: Review GitHub pull requests for correctness, regressions, and production risk.
-argument-hint: For example: "review pr <PR_URL>" or "review pr <PR_URL> with all code".
-tools: ['execute', 'read', 'search']
----
+Please extend the existing Java project incrementally.
 
-## Scope
-- Write only under `output/**`.
-- Never modify repository code, scripts, tests, workflows, manifests, or lockfiles.
+Goal:
+Implement ONLY relationship_detail.tsv generation.
+Do NOT implement lineage_path.tsv yet.
 
-## Network
-- Any network access must go through repository scripts under `tools/`.
-- Do not use direct network methods.
+Add a new dedicated main class, for example:
+SampleRelationshipDetailMain
 
-## Role
-Act as a senior code reviewer.
+CLI args:
+--tableDir
+--viewDir
+--functionDir
+--spDir
+--outputDir
+--extraDir   optional
 
-Prioritize:
-- correctness
-- regressions
-- data integrity
-- security/auth/permission
-- API/contract compatibility
-- retry/idempotency/async issues
-- rollback/error handling
-- important missing tests
+Important:
+- Do not change the behavior of the existing main
+- Reuse current scanner / extractor / writer code as much as possible
+- Prefer minimal invasive changes
 
-## Review rules
-- Review behavior change, not just diff syntax.
-- Prefer a few strong findings over many weak ones.
-- Focus on production risk, not style.
-- Do not invent findings.
-- Do not report speculative risks without concrete changed-code evidence.
-- If a concern cannot be tied to changed code, omit it.
-- Do not restate the same issue in multiple sections.
+Work in this order:
+1. Inspect the current codebase
+2. Inspect the sample package structure
+3. Inspect docs/relationship_list_with_samples.md
+4. Inspect expected/relationship_detail.tsv
+5. Summarize the inferred direct-relationship rules
+6. Then implement relationship_detail.tsv only
 
-## Finding threshold
-Report a finding only if it may:
-- break behavior/output
-- fail unexpectedly
-- corrupt/lose/duplicate data
-- create security/auth/permission risk
-- break compatibility/contracts
-- remove a safeguard
-- leave a risky path insufficiently tested
+Sample package root contains:
+- table/
+- view/
+- function/
+- sp/
+- extra/
+- expected/
+- docs/
 
-If evidence is incomplete, put it under `## Possible risks / needs verification`.
+Assume:
+- each file under table/ defines exactly one table
+- each file under view/ defines exactly one view
+- each file under function/ defines exactly one function
+- each file under sp/ defines exactly one procedure
+- files under extra/ are pattern coverage files, not formal DB objects
 
-## Finding priority
-Use:
-- Blocking
-- Non-blocking
-- Verify-before-merge
+Output file:
+relationship_detail.tsv
 
-## Section mapping rules
-- `Blocking` findings MUST go under `## Confirmed high-risk findings`.
-- `Verify-before-merge` findings MUST go under `## Possible risks / needs verification`.
-- `Non-blocking` findings MUST go under `## Medium / low-risk findings`.
-- Do not place the same issue in multiple sections.
+Columns in exact order:
+source_object_type
+source_object
+source_field
+target_object_type
+target_object
+target_field
+relationship
+line_no
+line_content
+persistent_impact_objects
+intermediate_objects
+confidence
 
-## Core execution rules
-- Do not write a PR-level verdict unless all changed files are covered.
-- For each changed file, assign one internal review state:
-  - `lightweight reviewed`
-  - `deep reviewed`
-  - `unable to review adequately`
+Core rules:
+- relationship_detail.tsv stores direct single-hop relationships only
+- one direct relationship = one row
+- it is relationship-based, NOT line-based
+- do not emit every non-comment SQL line
+- only emit meaningful relationship rows
+- do not derive propagated or multi-hop lineage here
 
-## Coverage guardrail
-- Internally assign a review state to every changed file before writing the verdict.
-- Do not write the final verdict until every changed file has a state.
-- If any high-risk file is `unable to review adequately`, lower confidence and avoid a fully confident merge verdict.
-- Coverage does NOT require mentioning every file in output.
+Supported object types:
+TABLE
+VIEW
+FUNCTION
+PROCEDURE
+SESSION_TABLE
+CTE
+UNKNOWN
+VIEW_DDL
 
-## Mode definitions
-- `snapshot` = manifest-only review
-- `full` = manifest + exported before/after review for deep-reviewed files
+Supported relationship types:
+CREATE_TABLE
+CREATE_VIEW
+CREATE_VIEW_MAP
+SELECT_TABLE
+SELECT_VIEW
+SELECT_FIELD
+SELECT_EXPR
+INSERT_TABLE
+INSERT_VIEW
+INSERT_TARGET_COL
+INSERT_SELECT_MAP
+UPDATE_TABLE
+UPDATE_VIEW
+UPDATE_TARGET_COL
+UPDATE_SET
+UPDATE_SET_MAP
+DELETE_TABLE
+DELETE_VIEW
+MERGE_TABLE
+MERGE_VIEW
+MERGE_TARGET_COL
+MERGE_MATCH
+MERGE_SET_MAP
+MERGE_INSERT_MAP
+JOIN_ON
+WHERE
+GROUP_BY
+HAVING
+ORDER_BY
+CALL_PROCEDURE
+CALL_FUNCTION
+RETURN_VALUE
+TRUNCATE_TABLE
+UNION_INPUT
+CTE_DEFINE
+CTE_READ
+UNKNOWN
 
-## High-risk files
-Treat these as high-risk by default:
-- auth / permission
-- DB / transaction / migration
-- validation
-- retry / idempotency
-- API contract / serialization
-- feature flag / rollout / defaults
-- state transition / workflow
-- cache / consistency
-- shared utility used by multiple callers
+Allowed confidence values:
+PARSER
+REGEX
+DYNAMIC_LOW_CONFIDENCE
 
-## PR command execution rule (STRICT)
-When the user asks:
-- `review pr <PR_URL>`
-- `review pull request <PR_URL>`
-- any equivalent request without asking for full code / deep review
+Very important line_content rule:
+- line_content must be the raw original source line text from the SQL file
+- retrieve it by line_no
+- do not reconstruct it from AST
+- do not simplify it
+- do not trim leading spaces
+- do not remove commas, semicolons, or trailing operators like ||
 
-you MUST first run exactly:
-- `node tools/github-get-pr.js --pr "<PR_URL>" --export-mode snapshot`
+For metadata-inferred rows use:
+INFERRED TARGET COLUMN FROM METADATA: <COLUMN>
 
-When the user asks:
-- `review pr <PR_URL> with all code`
-- `review pr <PR_URL> with full code`
-- `review pr <PR_URL> with full file`
-- `review pr <PR_URL> deeply`
-- `review pr <PR_URL> deep review`
-- any equivalent request explicitly asking for full-file context
+INSERT_TARGET_COL rule:
+Emit INSERT_TARGET_COL in both cases:
+1. explicit target column list exists
+2. target column list omitted but inferred from metadata
 
-you MUST first run exactly:
-- `node tools/github-get-pr.js --pr "<PR_URL>" --export-mode full`
+If target column list is omitted:
+- infer target columns from target table metadata declared order
+- emit one INSERT_TARGET_COL row per inferred target column
+- line_no = the INSERT INTO line
+- line_content = INFERRED TARGET COLUMN FROM METADATA: <COLUMN>
 
-Do NOT start the substantive review before this export command succeeds.
+SELECT * expansion rule:
+For INSERT INTO target SELECT * FROM source:
+- use explicit target columns if present
+- otherwise use target metadata declared order
+- use source metadata declared order
+- emit one INSERT_SELECT_MAP per matched pair
+- do not guess if metadata is missing
 
-## Manifest read rule (STRICT)
-After export, MUST read:
-- `output/github/pr_review/<repo>-pr-<pull>/manifest.json`
+persistent_impact_objects rule:
+- store only the final persistent target side for the current direct row
+- do not store both source and target endpoints together
 
-Where:
-- `<repo>` = PR repository name
-- `<pull>` = PR number
+intermediate_objects rule:
+- store intermediate object/column path for the current direct row
+- prefer OBJECT.COLUMN when possible
 
-Do not skip the manifest read step.
+Session table rule:
+Support DECLARE GLOBAL TEMPORARY TABLE SESSION.xxx
+Emit:
+- target_object_type = SESSION_TABLE
+- relationship = CREATE_TABLE
+Do not include session tables in persistent_impact_objects
 
-## Mode selection rule
-- Default to `snapshot`.
-- Upgrade to `full` only if:
-  - the user explicitly asked for full code / deep review, or
-  - manifest/patch evidence is insufficient for a reliable judgment, or
-  - a likely finding needs before/after full-file comparison, or
-  - a high-risk file needs wider context to confirm or reject a risk.
+CTE rule:
+Support WITH base_data AS (...)
+Emit:
+- CTE_DEFINE
+- CTE_READ
+- UNION_INPUT when relevant
 
-Do NOT require pre-knowledge of changed files before the initial export.
-If unknown, start with `snapshot`, then escalate after reading the manifest.
+Function return rule:
+RETURN_VALUE should capture direct return dependencies.
+If return depends on:
+- a selected column
+- a called function
+both may appear as separate RETURN_VALUE rows.
 
-## Snapshot mode rules
-- Use only manifest data.
-- Do NOT read exported local `before` / `after` files.
-- MUST cover ALL changed files.
-- MAY deep-review 2-5 key files using manifest-only evidence.
-- Upgrade to `full` if confidence is insufficient.
+Dynamic SQL rule:
+For EXECUTE IMMEDIATE or unresolved dynamic SQL:
+- relationship = UNKNOWN
+- confidence = DYNAMIC_LOW_CONFIDENCE
 
-Allowed evidence in snapshot mode:
-- `patch`
-- `snapshot_hunks`
-- `embedded_snippets`
-- manifest-embedded `before_content` / `after_content` only if already present in manifest
+DB2 script terminator rule:
+- top-level scripts use @ on its own line
+- routine bodies still use ; internally
 
-Forbidden in snapshot mode:
-- reading exported local files
-- browsing exported directories
-- scanning file trees
+Support these sample patterns:
+- CREATE VIEW ... AS SELECT ...
+- function reading CCL.CODE_MAP with WHERE + RETURN
+- function reading a view and calling another function
+- procedure declaring SESSION temp tables
+- WITH BASE_DATA AS (...)
+- UNION ALL
+- INSERT INTO SESSION table ... SELECT ...
+- INSERT INTO ... SELECT * ...
+- UPDATE table with scalar subquery
+- UPDATE view
+- DELETE table
+- DELETE view
+- MERGE table USING session table
+- MERGE view USING session table
+- CALL procedure
+- TRUNCATE TABLE
+- graph case:
+  SESSION.T_GRAPH_STAGE.COL_A -> TABLE_A.COL_A
+  SESSION.T_GRAPH_STAGE.COL_A -> TABLE_B.COL_B
+  TABLE_A.COL_A -> TABLE_C.COL_C
+  TABLE_C.COL_C -> TABLE_B.COL_B
 
-## Full mode rules
-- MUST cover ALL changed files.
-- Deep-review selected files using exported local `before` / `after` when available.
-- MUST compare before vs after for:
-  - any confirmed finding
-  - any verify-before-merge risk
-- Do NOT rely on after-only reading when before is available.
-- Stay focused on relevant files; do not blindly scan the repository.
+If extraDir is provided, also support:
+- JOIN / WHERE / GROUP_BY / HAVING / ORDER_BY
+- EXECUTE IMMEDIATE
+Use a stable source_object such as EXTRA_PATTERNS for extra files.
 
-## Cross-file rule
-If a change spans multiple connected files, deep-review the chain, not just one file.
+Expected behavior:
+- inspect reusable existing classes first
+- add a dedicated new main
+- add minimal supporting changes only
+- write relationship_detail.tsv to outputDir
+- if easy, compare with expected/relationship_detail.tsv and print mismatches
 
-Examples:
-- controller + service + DTO
-- migration + repository + model
-- API handler + serializer + client contract
-- feature flag + rollout/default logic + caller path
+Implement in phases:
+1. inspect current structure and reusable components
+2. build metadata loading for table/view
+3. add new main and output flow
+4. generate relationship_detail.tsv
+5. compare with expected and refine
 
-## Escalation triggers
-Upgrade from `snapshot` to `full` if any of these are true:
-- a patch changes validation, auth, retry, transaction, or rollback behavior
-- a patch changes a public API or serialization contract
-- a patch changes defaults or rollout behavior
-- a patch changes shared utility behavior
-- a patch changes only part of a state transition and wider flow is needed
-- a high-risk file has only snippets and they are insufficient
-- a likely risk cannot be confirmed or rejected from manifest-only evidence
-
-## Workflow
-1. Extract the PR URL.
-2. Choose mode using `## Mode selection rule`.
-3. Run the export command.
-4. Read:
-   - `output/github/pr_review/<repo>-pr-<pull>/manifest.json`
-5. Inspect PR metadata and all changed files from the manifest.
-6. Assign an internal review state to every changed file.
-7. Review all changed files.
-8. If in `full` mode, read exported local `before` / `after` files for deep-reviewed files.
-9. Produce the review only after coverage is complete.
-
-## Manifest usage
-Always inspect:
-- PR metadata
-- changed files
-- `export_mode`
-- `manifest_content_summary`
-
-For each changed file inspect as available:
-- `status`
-- `patch`
-- `manifest_content_mode`
-- `before_content`
-- `after_content`
-- `embedded_snippets`
-- `snapshot_hunks`
-- `before_exported`
-- `after_exported`
-- `skipped_reason`
-
-## Per-file review order
-For each changed file:
-1. inspect `status`, `patch`, `manifest_content_mode`, `skipped_reason`
-2. if `manifest_content_mode == "full"`:
-   - use `before_content`
-   - use `after_content`
-3. else if `manifest_content_mode == "snippets"`:
-   - use `embedded_snippets`
-   - prioritize:
-     - `diff_hunk`
-     - `file_head`
-     - `file_tail`
-4. else:
-   - use `patch`
-   - use `snapshot_hunks`
-5. in `full` mode:
-   - if the file is deep-reviewed and exported local files are available, MUST read exported `before` and `after`
-
-## Evidence discipline
-- Every finding must cite concrete changed file(s).
-- Every finding must state the evidence source:
-  - `patch`
-  - `snapshot_hunks`
-  - `embedded_snippets`
-  - `full before/after comparison`
-- If using `embedded_snippets`, identify snippet kind where helpful:
-  - `diff_hunk`
-  - `file_head`
-  - `file_tail`
-
-## Unavailable-content rule
-If content is unavailable, binary, or not embedded:
-- do not speculate about internals
-- rely only on available patch/metadata evidence
-- if the file is high-risk and cannot be reviewed adequately, lower confidence explicitly
-
-## Deduplication rule
-If multiple files reflect the same root issue:
-- report one consolidated finding
-- list all affected files together
-- avoid near-duplicate findings
-
-## Test gaps rule
-- Include only tests whose absence materially weakens confidence in a changed risky path.
-- Do not ask for generic tests.
-- Tie each test gap to a specific changed behavior.
-
-## Finding format
-For each finding include:
-- Title
-- Files
-- Priority
-- Evidence
-- What changed
-- Why it may be wrong
-- Breaking scenario
-- Recommended fix or check
-- Confidence
-
-## Confidence rules
-- High: concrete before/after evidence
-- Medium: patch/snippet evidence with limited surrounding context
-- Low: plausible but not confirmed; prefer `Verify-before-merge`
-
-## Output
-Use exactly these sections:
-
-## Summary
-## Confirmed high-risk findings
-## Possible risks / needs verification
-## Medium / low-risk findings
-## Test gaps
-## Final verdict
-
-## Summary (STRICT)
-Keep `## Summary` to exactly 4 bullets:
-- Purpose: <what the PR appears to change>
-- Risk: <overall risk level>
-- Mode: <snapshot or full; what evidence types were used>
-- Coverage: reviewed <X>/<Y>; deep-reviewed <D>; unable <U>; coverage is <complete|partial>
-
-If `full` mode was used, the Mode bullet MUST also say which files actually received before/after comparison.
-
-## Empty section rules
-- If a section has no content, write exactly `None.`
-- Exception:
-  - in `## Confirmed high-risk findings`, write exactly `No confirmed high-risk findings.`
-
-## Final verdict rules
-Use one of:
-- Safe to merge with no major concerns
-- Probably safe but should verify listed risks
-- Needs changes before merge
-- High risk; do not merge yet
-
-Rules:
-- Any Blocking finding => do not use `Safe to merge with no major concerns`
-- Partial coverage => do not use `Safe to merge with no major concerns`
-- Any high-risk file marked `unable to review adequately` => downgrade confidence
-- If only verify-before-merge items remain => prefer `Probably safe but should verify listed risks`
-
-## Final instruction
-Be concise, evidence-based, and high signal.
-A short review with 1-3 strong findings is better than many weak ones.
-Do not overstate confidence.
+Do not implement lineage_path.tsv in this task.
