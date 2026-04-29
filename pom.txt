@@ -93,3 +93,450 @@ public class MyEntityService {
         </plugins>
     </build>
 </project>
+
+ompt: Analyze DB2 Stored Procedure SQL Patterns in a Folder
+
+You are a senior DB2 SQL PL / Stored Procedure expert and a static SQL lineage analysis expert.
+
+## Goal
+
+Analyze all DB2 SQL / Stored Procedure files under a given folder.
+
+The purpose is **not** to list every file one by one.
+
+The purpose is to identify what kinds of DB2 SQL PL patterns are used in the folder.
+
+If multiple files use the same or very similar pattern, keep only **one most complex and most representative example**.
+
+The final output should be a Markdown report in English.
+
+---
+
+## Input
+
+Folder path:
+
+```text
+<PUT_FOLDER_PATH_HERE>
+```
+
+Example:
+
+```text
+D:\check\sample_case\sp
+```
+
+File extensions may include:
+
+```text
+.sql
+.db2
+.ddl
+```
+
+Please scan the folder recursively.
+
+---
+
+## Main Task
+
+For each SQL file:
+
+1. Detect whether it contains DB2 Stored Procedure / Function / SQL PL code.
+2. Identify the DB2 SQL PL syntax patterns used in the file.
+3. Group files by syntax / usage pattern.
+4. Deduplicate similar patterns.
+5. For each pattern, keep only the most complex and most useful representative example.
+6. Explain why that file is selected as the representative example.
+7. Extract the most important SQL snippet from the file.
+
+---
+
+## Pattern Categories to Detect
+
+Please detect at least the following DB2 SQL PL patterns.
+
+### 1. Routine Definition Patterns
+
+- `CREATE PROCEDURE`
+- `CREATE FUNCTION`
+- `CREATE OR REPLACE PROCEDURE`
+- `CREATE OR REPLACE FUNCTION`
+- `LANGUAGE SQL`
+- `BEGIN ATOMIC`
+- `BEGIN NOT ATOMIC`
+- `IN` / `OUT` / `INOUT` parameters
+- `RETURNS`
+- `RETURN`
+
+### 2. Control Flow Patterns
+
+- `IF / ELSEIF / ELSE / END IF`
+- `CASE WHEN`
+- `LOOP`
+- `WHILE`
+- `REPEAT`
+- `FOR` loop
+- `LEAVE`
+- `ITERATE`
+- `GOTO`
+- Nested compound statements
+
+### 3. Cursor Patterns
+
+- `DECLARE CURSOR`
+- `CURSOR WITH RETURN`
+- `OPEN`
+- `FETCH INTO`
+- `CLOSE`
+- Multiple cursors
+- Cursor over complex `SELECT`
+- Cursor inside `IF` / `LOOP`
+- Cursor returned to caller
+
+### 4. Exception / Handler Patterns
+
+- `DECLARE HANDLER`
+- `CONTINUE HANDLER`
+- `EXIT HANDLER`
+- `SQLEXCEPTION`
+- `SQLWARNING`
+- `NOT FOUND`
+- `SQLSTATE`
+- `SQLCODE`
+- `GET DIAGNOSTICS`
+- `SIGNAL`
+- `RESIGNAL`
+
+### 5. DML Patterns
+
+- `INSERT INTO ... VALUES`
+- `INSERT INTO ... SELECT`
+- `UPDATE ... SET`
+- `DELETE FROM`
+- `MERGE INTO`
+- `SELECT INTO`
+- Multi-table `SELECT`
+- Nested `SELECT`
+- Scalar subquery
+- `EXISTS` / `NOT EXISTS`
+- `IN` / `NOT IN`
+- `BETWEEN`
+- `LIKE`
+- `IS NULL` / `IS NOT NULL`
+
+### 6. Join and Query Structure Patterns
+
+- `INNER JOIN`
+- `LEFT JOIN`
+- `RIGHT JOIN`
+- `FULL JOIN`
+- `CROSS JOIN`
+- Multiple joins
+- Complex `JOIN ON` conditions
+- `GROUP BY`
+- `HAVING`
+- `ORDER BY`
+- `UNION` / `UNION ALL`
+- `INTERSECT`
+- `EXCEPT`
+- `WITH` / CTE
+- Recursive CTE
+
+### 7. Temporary Table / DDL Patterns
+
+- `DECLARE GLOBAL TEMPORARY TABLE`
+- `CREATE GLOBAL TEMPORARY TABLE`
+- `CREATE TABLE`
+- `CREATE VIEW`
+- `DROP TABLE`
+- `TRUNCATE TABLE`
+- `ON COMMIT DELETE ROWS`
+- `ON COMMIT PRESERVE ROWS`
+- `WITH REPLACE`
+- `NOT LOGGED INITIALLY`
+
+### 8. Dynamic SQL Patterns
+
+- `EXECUTE IMMEDIATE`
+- `PREPARE`
+- `EXECUTE`
+- `DECLARE STATEMENT`
+- Dynamic `SELECT`
+- Dynamic `INSERT` / `UPDATE` / `DELETE`
+- Dynamic SQL string concatenation
+
+### 9. Call and Function Usage Patterns
+
+- `CALL` procedure
+- Nested `CALL`
+- Scalar function invocation
+- Table function invocation
+- Built-in functions, for example:
+  - `COALESCE`
+  - `VALUE`
+  - `DECIMAL`
+  - `VARCHAR_FORMAT`
+  - `DATE`
+  - `TIMESTAMP`
+  - `DAYS`
+  - `ROUND`
+  - `SUBSTR`
+  - `LENGTH`
+
+### 10. Variable and Assignment Patterns
+
+- `DECLARE` variable
+- `SET` variable
+- `SELECT ... INTO` variable
+- `VALUES ... INTO`
+- `DEFAULT` value
+- Complex expression assignment
+- Arithmetic expression
+- String concatenation using `||`
+
+### 11. DB2-Specific Routine Options and Special Syntax
+
+- `SPECIFIC`
+- `RESULT SETS`
+- `MODIFIES SQL DATA`
+- `READS SQL DATA`
+- `DETERMINISTIC`
+- `EXTERNAL ACTION`
+- `FENCED` / `NOT FENCED`
+- `COMMIT`
+- `ROLLBACK`
+- `SAVEPOINT`
+- `CURRENT DATE`
+- `CURRENT TIMESTAMP`
+- Special registers
+- Identity / sequence usage
+- `NEXT VALUE FOR`
+
+---
+
+## Deduplication Rules
+
+If several files contain the same pattern, do **not** output all of them.
+
+Select only the best representative file using these rules:
+
+1. Prefer the file with the highest syntax complexity.
+2. Prefer the file that combines multiple related patterns.
+3. Prefer the file whose SQL snippet is complete and useful as a test case.
+4. Prefer real business-like logic over trivial demo SQL.
+5. If two files are similar, choose the one with:
+   - more lines,
+   - deeper nesting,
+   - more DML types,
+   - more joins,
+   - more predicate logic,
+   - more lineage value.
+
+---
+
+# Required Output Format
+
+Please output a Markdown report using the following structure.
+
+# DB2 Stored Procedure Pattern Coverage Report
+
+## 1. Scan Scope
+
+- Root folder:
+- Number of SQL files scanned:
+- Number of DB2 Stored Procedure / Function files:
+- Number of non-routine SQL files:
+- Analysis time:
+
+## 2. Pattern Coverage Overview
+
+| Pattern Category | Found | Representative File | Complexity Level | Notes |
+|---|---:|---|---:|---|
+
+Complexity level:
+
+- `1` = very simple
+- `2` = simple
+- `3` = medium
+- `4` = complex
+- `5` = very complex
+
+## 3. Deduplicated Representative Test Cases
+
+| No. | Pattern Category | Representative File | Key Syntax Covered | Why This File Was Selected |
+|---:|---|---|---|---|
+
+Only keep one most complex representative example for the same pattern, unless there are clearly different variants.
+
+## 4. Detailed Analysis by Pattern Category
+
+Use the following format for each category.
+
+### 4.x Pattern Category Name
+
+**Found:** Yes / No
+
+**Representative file:**
+
+```text
+relative/path/to/file.sql
+```
+
+**Complexity level:** 1-5
+
+**Syntax covered:**
+
+- ...
+- ...
+- ...
+
+**Why this is the most complex representative:**
+
+- ...
+- ...
+- ...
+
+**Core SQL snippet:**
+
+```sql
+Paste only the most important and most complex snippet here.
+Do not paste the whole file.
+If the snippet is long, keep only the core 30-80 lines.
+```
+
+**Why this is useful as a test case:**
+
+- ...
+- ...
+- ...
+
+---
+
+## 5. Top 10 Files Most Worth Adding to the Test Suite
+
+Rank files by test value.
+
+| Rank | File | Test Value | Patterns Covered | Notes |
+|---:|---|---:|---|---|
+
+Test value:
+
+- `5` = must add
+- `4` = strongly recommended
+- `3` = useful
+- `2` = optional
+- `1` = low value
+
+## 6. Missing Coverage
+
+List important DB2 SQL PL patterns that are **not found** in this folder but should be added for better lineage extractor testing.
+
+| Missing Pattern | Importance | Suggested Additional Test |
+|---|---:|---|
+
+Importance:
+
+- High
+- Medium
+- Low
+
+## 7. Recommendations for DB2 Static Lineage Extractor Testing
+
+Please focus on how these SQL files can test a DB2 static lineage extractor.
+
+Mention which snippets are good for validating:
+
+- `CREATE_TABLE`
+- `CREATE_VIEW`
+- `DECLARE GLOBAL TEMPORARY TABLE`
+- `TRUNCATE_TABLE`
+- `INSERT_TABLE`
+- `UPDATE_TABLE`
+- `DELETE_TABLE`
+- `MERGE_INTO`
+- `CALL_PROCEDURE`
+- `CALL_FUNCTION`
+- `RETURN_VALUE`
+- `SELECT_TABLE`
+- `SELECT_VIEW`
+- `INSERT_TARGET_COL`
+- `UPDATE_TARGET_COL`
+- `MERGE_TARGET_COL`
+- `INSERT_SELECT_MAP`
+- `UPDATE_SET_MAP`
+- `MERGE_SET_MAP`
+- `MERGE_INSERT_MAP`
+- `CREATE_VIEW_MAP`
+- `WHERE`
+- `JOIN_ON`
+- `MERGE_MATCH`
+- `GROUP_BY`
+- `HAVING`
+- `ORDER_BY`
+- `SELECT_EXPR`
+- `CONTROL_FLOW_CONDITION`
+- `CURSOR_DEFINE`
+- `CURSOR_FETCH_MAP`
+- `EXCEPTION_HANDLER_MAP`
+- `DIAGNOSTICS_FETCH_MAP`
+
+For each recommended snippet, explain:
+
+1. Which file it comes from.
+2. Which relationship types it should produce.
+3. Why it is valuable for lineage testing.
+4. Any special edge cases, such as alias resolution, nested predicates, `CASE WHEN`, `NULL`, string concatenation, arithmetic literals, or cursor fetch mappings.
+
+## 8. Final Conclusion
+
+Please conclude with:
+
+1. Whether this folder has enough DB2 SQL PL coverage.
+2. The top 5 Stored Procedure / Function files to test first.
+3. Which DB2 SQL patterns are still missing.
+4. Which files can be ignored because they are duplicate or too simple.
+
+---
+
+## Strict Rules
+
+- Do not only list files.
+- Group by DB2 SQL PL pattern.
+- Deduplicate similar patterns.
+- For the same pattern, keep only the most complex representative example.
+- SQL snippets must come from real files.
+- Do not invent SQL.
+- Use relative file paths.
+- If a file cannot be parsed or analyzed, explain why.
+- If a pattern category is not found, explicitly write `No`.
+- Do not modify source files.
+- Do not generate new SQL files unless explicitly asked later.
+- The final answer must be in Markdown.
+- The analysis must be in English.
+
+---
+
+## Special Focus
+
+My real goal is to test a DB2 static lineage extractor.
+
+So please prioritize SQL files and SQL snippets that are useful for testing:
+
+- field-level lineage,
+- predicate lineage,
+- join lineage,
+- cursor lineage,
+- handler lineage,
+- diagnostics lineage,
+- control-flow lineage,
+- `INSERT_SELECT_MAP`,
+- `UPDATE_SET_MAP`,
+- `MERGE_SET_MAP`,
+- `MERGE_INSERT_MAP`,
+- `CURSOR_FETCH_MAP`,
+- `EXCEPTION_HANDLER_MAP`,
+- `DIAGNOSTICS_FETCH_MAP`,
+- `CONTROL_FLOW_CONDITION`.
+
+
