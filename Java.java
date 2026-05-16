@@ -1,588 +1,1876 @@
-You are working in an existing Java project that already uses JSqlParser and already has code for:
-- scanning SQL files
-- extracting routines
-- extracting SQL usage
-- writing TSV / Excel-like outputs
 
-Please extend the existing project incrementally.
-
-====================================
-GOAL
-====================================
-
-Implement ONLY the generation of:
-
-- relationship_detail.tsv
-
-Do NOT implement lineage_path.tsv in this task.
-
-Add a new main class that accepts these folder arguments:
-
-- --tableDir
-- --viewDir
-- --functionDir
-- --spDir
-- --outputDir
-
-And also support this optional argument:
-
-- --extraDir
-
-The implementation must reuse the existing project structure as much as possible.
-
-Do NOT modify the behavior of the existing main entry point unless strictly required.
-Add a new dedicated main for this task.
-
-====================================
-SCOPE DECISION
-====================================
-
-For this task, process:
-
-- table/
-- view/
-- function/
-- sp/
-
-And if provided, also process:
-
-- extra/
-
-That means:
-- CLI inputs must support tableDir, viewDir, functionDir, spDir, outputDir
-- extraDir is optional
-- if extraDir is provided, process extra SQL files and include their direct relationships in relationship_detail.tsv
-
-expected/relationship_detail.tsv used in this task may include rows from:
-- table/
-- view/
-- function/
-- sp/
-- extra/
-
-Do not ignore extra/ if it exists and expected result includes extra-pattern rows.
-
-====================================
-WORK IN THIS ORDER
-====================================
-
-1. Inspect the current project structure first
-2. Inspect the sample package folder structure
-3. Inspect docs/relationship_list_with_samples.md
-4. Inspect expected/relationship_detail.tsv
-5. Compare sample SQL and expected result carefully
-6. Summarize the inferred relationship rules in your own words before implementation
-7. Then implement only relationship_detail.tsv generation
-8. Do NOT implement lineage_path.tsv in this task
-
-====================================
-SAMPLE PACKAGE STRUCTURE
-====================================
-
-Assume the sample package root contains:
-
-- table/
-- view/
-- function/
-- sp/
-- extra/
-- expected/
-- docs/
-
-Do not depend on the exact root folder name.
-
-Typical structure:
-
-sample_case_verified/
-  table/
-    CCL.CODE_MAP.sql
-    FOS.API_MTM_REVAL.sql
-    INTERFACE.API_MTM_REVAL.sql
-    INTERFACE.API_MTM_REVAL_STAR.sql
-    RPT.MTM_REVAL_AUDIT.sql
-    INTERFACE.MTM_REVAL_HIST.sql
-    INTERFACE.MTM_REVAL_TMP_COPY.sql
-    TABLE_A.sql
-    TABLE_B.sql
-    TABLE_C.sql
-  view/
-    INTERFACE.V_API_MTM_REVAL.sql
-  function/
-    INTERFACE.FN_GET_CODE_MAP_VALUE.sql
-    INTERFACE.FN_REL_DEMO.sql
-  sp/
-    RPT.PR_AUDIT_MTM_REVAL.sql
-    INTERFACE.PI_API_MTM_REVAL_DEMO.sql
-    INTERFACE.PI_GRAPH_DEMO.sql
-  extra/
-    extra_patterns.sql
-  expected/
-    relationship_detail.tsv
-    lineage_path.tsv
-  docs/
-    relationship_list_with_samples.md
-
-Assume:
-- each file under table/ defines exactly one table
-- each file under view/ defines exactly one view
-- each file under function/ defines exactly one function
-- each file under sp/ defines exactly one procedure
-- files under extra/ are pattern coverage files, not formal DB objects
-
-====================================
-NEW MAIN
-====================================
-
-Add a new main class, for example:
-
-org.example.sqlusagechecker.SampleRelationshipDetailMain
-
-This main must accept:
-
---tableDir <path>
---viewDir <path>
---functionDir <path>
---spDir <path>
---outputDir <path>
---extraDir <path>   optional
-
-Behavior:
-- validate required args
-- log resolved paths
-- scan SQL files from tableDir, viewDir, functionDir, spDir
-- if extraDir is provided, scan SQL files from extraDir too
-- build metadata from table and view files
-- extract direct relationships from function and procedure files
-- process view files for CREATE_VIEW / CREATE_VIEW_MAP
-- process extra SQL files if provided
-- write relationship_detail.tsv to outputDir
-
-Optional:
-- if expected/relationship_detail.tsv is available, print a simple diff summary
-
-====================================
-SCOPE LIMIT
-====================================
-
-Implement ONLY relationship_detail.tsv.
-
-Do NOT implement lineage_path.tsv.
-Do NOT derive multi-hop or propagated lineage here.
-Do NOT redesign the whole project.
-Do NOT replace the current architecture.
-Prefer minimal invasive changes.
-
-====================================
-OUTPUT COLUMNS
-====================================
-
-relationship_detail.tsv must contain these columns in this exact order:
-
-source_object_type
-source_object
-source_field
-target_object_type
-target_object
-target_field
-relationship
-line_no
-line_content
-persistent_impact_objects
-intermediate_objects
-confidence
-
-====================================
-CORE RULES
-====================================
-
-1. relationship_detail.tsv stores direct single-hop relationships only
-2. one direct relationship = one row
-3. relationship_detail.tsv is relationship-based, NOT line-based
-4. do NOT emit every non-comment SQL line
-5. only emit rows that correspond to meaningful relationships
-
-Do not emit rows for purely structural lines such as:
-- BEGIN
-- END
-- LANGUAGE SQL
-- MODIFIES SQL DATA
-- RETURNS ...
-- WITH REPLACE
-- ON COMMIT PRESERVE ROWS
-- (
-- )
-
-unless a supported relationship is explicitly defined for that line.
-
-====================================
-SOURCE_OBJECT RULE
-====================================
-
-Use object name whenever the object is known.
-
-Rules:
-- for FUNCTION rows, use fully qualified function name in source_object
-- for PROCEDURE rows, use fully qualified procedure name in source_object
-- for VIEW_DDL rows, use the view name consistently if known, otherwise use file name consistently
-- for extra pattern files, use a stable synthetic source_object such as EXTRA_PATTERNS or the extra file base name consistently
-- prefer object name over file name whenever a meaningful object name exists
-
-Do not mix file-name style and object-name style arbitrarily.
-
-====================================
-SUPPORTED OBJECT TYPES
-====================================
-
-At minimum support:
-
-- TABLE
-- VIEW
-- FUNCTION
-- PROCEDURE
-- SESSION_TABLE
-- CTE
-- UNKNOWN
-- VIEW_DDL
-
-====================================
-SUPPORTED RELATIONSHIP TYPES
-====================================
-
-At minimum support:
-
-- CREATE_TABLE
-- CREATE_VIEW
-- CREATE_VIEW_MAP
-
-- SELECT_TABLE
-- SELECT_VIEW
-- SELECT_FIELD
-- SELECT_EXPR
-
-- INSERT_TABLE
-- INSERT_VIEW
-- INSERT_TARGET_COL
-- INSERT_SELECT_MAP
-
-- UPDATE_TABLE
-- UPDATE_VIEW
-- UPDATE_TARGET_COL
-- UPDATE_SET
-- UPDATE_SET_MAP
-
-- DELETE_TABLE
-- DELETE_VIEW
-
-- MERGE_TABLE
-- MERGE_VIEW
-- MERGE_TARGET_COL
-- MERGE_MATCH
-- MERGE_SET_MAP
-- MERGE_INSERT_MAP
-
-- JOIN_ON
-- WHERE
-- GROUP_BY
-- HAVING
-- ORDER_BY
-
-- CALL_PROCEDURE
-- CALL_FUNCTION
-
-- RETURN_VALUE
-
-- TRUNCATE_TABLE
-
-- UNION_INPUT
-- CTE_DEFINE
-- CTE_READ
-
-- UNKNOWN
-
-====================================
-CONFIDENCE VALUES
-====================================
-
-Only allow:
-
-- PARSER
-- REGEX
-- DYNAMIC_LOW_CONFIDENCE
-
-====================================
-IMPORTANT RULES ABOUT line_no AND line_content
-====================================
-
-line_no:
-- line_no must be the line number inside the original SQL source file
-
-line_content:
-- line_content must be the raw original source line text from the SQL file
-- retrieve it by line_no from the source file
-- do NOT reconstruct it from AST nodes
-- do NOT simplify it
-- do NOT trim leading spaces
-- do NOT remove commas
-- do NOT remove semicolons
-- do NOT remove trailing operators like ||
-- do NOT rebuild SQL text manually
-
-For metadata-inferred rows where there is no explicit source line, use:
-
-INFERRED TARGET COLUMN FROM METADATA: <COLUMN>
-
-Example:
-INFERRED TARGET COLUMN FROM METADATA: CUST_NUM
-
-====================================
-IMPORTANT RULES ABOUT INSERT_TARGET_COL
-====================================
-
-Emit INSERT_TARGET_COL in BOTH cases:
-
-A. explicit target column list exists
-Example:
-INSERT INTO T (A, B, C)
-
-B. target column list is omitted but can be inferred from metadata
-Example:
-INSERT INTO T
-SELECT *
-FROM S
-
-In case B:
-- infer target columns from target table metadata declared order
-- still emit one INSERT_TARGET_COL row per inferred target column
-- line_no = the line number of the INSERT INTO statement
-- line_content = INFERRED TARGET COLUMN FROM METADATA: <COLUMN>
-
-====================================
-IMPORTANT RULES ABOUT SELECT * EXPANSION
-====================================
-
-For:
-INSERT INTO target
-SELECT *
-FROM source
-
-expand using metadata.
-
-Rules:
-- if explicit target column list exists, use that order
-- otherwise use target metadata declared order
-- use source metadata declared order
-- generate one INSERT_SELECT_MAP per matched pair
-- do not guess if metadata is missing
-
-====================================
-IMPORTANT RULES ABOUT persistent_impact_objects
-====================================
-
-persistent_impact_objects stores only the final persistent target side for the current direct row.
-
-Examples:
-- INTERFACE.API_MTM_REVAL.CUST_NUM
-- INTERFACE.V_API_MTM_REVAL.CUR_MTM_AMT
-- TABLE_B.COL_B
-
-Do NOT store both source and target endpoints together in this column.
-
-====================================
-IMPORTANT RULES ABOUT intermediate_objects
-====================================
-
-intermediate_objects should store intermediate object/column path for the current direct row.
-
-Prefer OBJECT.COLUMN granularity whenever possible.
-
-Examples:
-- BASE_DATA.CUST_NUM
-- BASE_DATA.CUST_NUM,SESSION.T_MTM_STAGE.CUST_NUM
-- SESSION.T_GRAPH_STAGE.COL_A
-
-For object-level relationships like CTE_DEFINE or CREATE_TABLE for session tables,
-object-only is acceptable.
-
-====================================
-SESSION TABLE RULE
-====================================
-
-Support:
-DECLARE GLOBAL TEMPORARY TABLE SESSION.xxx
-
-Emit:
-- target_object_type = SESSION_TABLE
-- relationship = CREATE_TABLE
-
-Do not include session tables in persistent_impact_objects.
-
-====================================
-CTE RULE
-====================================
-
-Support:
-WITH base_data AS (...)
-
-Emit:
-- CTE_DEFINE
-- CTE_READ
-- UNION_INPUT when relevant
-
-====================================
-FUNCTION RETURN RULE
-====================================
-
-For functions, RETURN_VALUE should capture direct return dependencies.
-
-If return depends on:
-- a selected column
-- a called function
-
-both may appear as separate RETURN_VALUE rows.
-
-====================================
-DYNAMIC SQL RULE
-====================================
-
-For EXECUTE IMMEDIATE or similar unresolved dynamic SQL:
-- emit relationship = UNKNOWN
-- confidence = DYNAMIC_LOW_CONFIDENCE
-
-Do not overclaim precision.
-
-====================================
-DB2 SCRIPT TERMINATOR RULE
-====================================
-
-The sample DB2 scripts use:
-- @ on its own line as top-level terminator
-- ; inside procedure/function bodies
-
-Your scanning and line lookup logic must preserve exact original lines correctly.
-
-====================================
-EXPECTED SAMPLE COVERAGE
-====================================
-
-The implementation must support these patterns present in the sample:
-
-From view/function/procedure files:
-1. CREATE VIEW ... AS SELECT ...
-2. function selecting from CCL.CODE_MAP with WHERE clauses and RETURN
-3. function selecting from a view and calling another function
-4. procedure declaring SESSION temp tables
-5. WITH BASE_DATA AS (...)
-6. UNION ALL
-7. INSERT INTO SESSION table ... SELECT ...
-8. INSERT INTO ... SELECT * ...
-9. UPDATE table with scalar subquery
-10. UPDATE view
-11. DELETE table
-12. DELETE view
-13. MERGE table USING session table
-14. MERGE view USING session table
-15. CALL procedure
-16. TRUNCATE TABLE
-17. graph case:
-    SESSION.T_GRAPH_STAGE.COL_A -> TABLE_A.COL_A
-    SESSION.T_GRAPH_STAGE.COL_A -> TABLE_B.COL_B
-    TABLE_A.COL_A -> TABLE_C.COL_C
-    TABLE_C.COL_C -> TABLE_B.COL_B
-
-If extraDir is provided, also support extra pattern coverage such as:
-18. JOIN / WHERE / GROUP BY / HAVING / ORDER BY
-19. EXECUTE IMMEDIATE ...
-
-====================================
-GRAPH CASE EXPECTATION
-====================================
-
-For PI_GRAPH_DEMO:
-- relationship_detail.tsv must only store direct rows
-- do NOT try to store full propagated paths here
-- just emit the direct edges
-
-====================================
-EXTRA FILE EXPECTATION
-====================================
-
-If extraDir is provided and contains extra_patterns.sql, relationship_detail.tsv should include direct rows for:
-- SELECT_TABLE
-- SELECT_FIELD
-- JOIN_ON
-- WHERE
-- GROUP_BY
-- HAVING
-- ORDER_BY
-- UNKNOWN for EXECUTE IMMEDIATE
-
-Use a consistent source_object such as:
-- EXTRA_PATTERNS
-
-====================================
-EXPECTED IMPLEMENTATION BEHAVIOR
-====================================
-
-Before implementation:
-- inspect current reusable scanner / extractor / writer classes
-- inspect sample SQL and expected TSV
-- inspect docs/relationship_list_with_samples.md
-- summarize the inferred direct-relationship rules
-
-During implementation:
-- reuse existing code as much as possible
-- add only minimal helper/service changes required
-- add a dedicated new main for this task
-- keep unsupported cases explicit
-
-After implementation:
-- write relationship_detail.tsv to outputDir
-- optionally compare it with expected/relationship_detail.tsv
-- report mismatches clearly
-
-====================================
-DELIVERABLES
-====================================
-
-Please implement:
-
-1. a new main class for relationship_detail generation
-2. minimal supporting changes required
-3. reuse current scanner/extractor/writer code as much as possible
-4. write relationship_detail.tsv to outputDir
-5. add tests if practical
-6. if expected file comparison is easy, add a lightweight comparison mode
-
-====================================
-IMPLEMENTATION STYLE
-====================================
-
-- inspect the current code first
-- prefer incremental enhancement
-- avoid broad refactors
-- keep package structure consistent
-- write readable code
-- add comments only where useful
-- keep unsupported cases explicit
-
-====================================
-PHASED APPROACH
-====================================
-
-Implement in phases:
-
-Phase 1:
-- inspect current project structure
-- identify reusable scanner / extractor / writer components
-
-Phase 2:
-- build metadata loading for table/view folders
-- add new main and output flow
-
-Phase 3:
-- generate relationship_detail.tsv for the sample case
-
-Phase 4:
-- compare with expected/relationship_detail.tsv and refine mismatches
-
-Do not implement lineage_path.tsv in this task.
+CREATE OR REPLACE PROCEDURE INTERFACE.1()
+-- DB2_SYNTAX_FIX: added empty parameter list for no-argument procedure.
+SPECIFIC 1
+LANGUAGE SQL
+
+
+BEGIN
+
+    DECLARE SQLCODE             INT DEFAULT 0;
+    DECLARE ld_message_text     VARCHAR(512);
+    DECLARE ld_err_pos          VARCHAR(1000);
+    DECLARE ld_error_message    VARCHAR(512);
+    DECLARE ld_procedure_name   VARCHAR(100) DEFAULT 'INTERFACE.PR_TRANSFORM_GM_COMMON_DEAL';
+    DECLARE ld_last_biz_date DATE;
+    DECLARE ld_biz_date DATE;
+    DECLARE ls_local_ccy_code   VARCHAR(3);
+    DECLARE ls_region_code      VARCHAR(3);
+
+    -- Exception handling when there is error
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        GET DIAGNOSTICS EXCEPTION 1 ld_message_text = MESSAGE_TEXT;
+
+        -- if SQLSTATE = 57011(transaction log for the database is full), cannot update or insert until commit.
+        COMMIT;
+        VALUES (ld_procedure_name || ' failed. ' || ld_err_pos || '. Details: ' || ld_message_text) INTO ld_error_message;
+        IF (SUBSTR(ld_message_text, 1, 8) <> 'SQL0438N') THEN -- DB2_SYNTAX_FIX: normalized not-equal operator
+            CALL INTERFACE.PR_PROCEDURE_LOG('GENERIC_MEMO_TRANSFORM', ld_procedure_name, 'ERROR', ld_error_message);
+            commit;
+        END IF;
+        RESIGNAL SQLSTATE '88888';
+    END;
+
+    CALL INTERFACE.PR_PROCEDURE_LOG('GENERIC_MEMO_TRANSFORM', ld_procedure_name, 'INFO', 'Start insert data to INTERFACE.GM_COMMON_DEAL');
+
+    DECLARE GLOBAL TEMPORARY TABLE SESSION.UNDERLYING_COUNT
+    (
+        NMEMO_ISSUE_CODE        VARCHAR(20),
+        TOTAL_COUNT             INTEGER
+    )
+    WITH REPLACE ON COMMIT PRESERVE ROWS NOT LOGGED;
+
+    SELECT LAST_BUS_DT, BUS_DT, REGION_CDE INTO ld_last_biz_date, ld_biz_date, ls_region_code FROM INTERFACE.SYS WHERE SYS_CDE = 'EFOS';
+    SET ls_local_ccy_code = INTERFACE.FN_GET_LOCAL_CURRENCY();
+
+    IF EXISTS ( SELECT 1 FROM INTERFACE.GM_COMMON_DEAL FETCH FIRST 1 ROW ONLY ) THEN
+        DELETE FROM INTERFACE.GM_COMMON_DEAL;
+    END IF;
+
+    SET ld_err_pos = 'Position: insert client data to INTERFACE.GM_COMMON_DEAL ';
+    INSERT INTO INTERFACE.GM_COMMON_DEAL
+    (
+        ACTV_FLAG
+        ,DEAL_NUM
+        ,DEAL_SB_NUM
+        ,DEAL_COMP_CDE
+        ,DEAL_BRNCH_CDE
+        ,DEAL_TRAN_TYPE
+        ,CUST_NUM
+        ,SB_ACCT_NUM
+        ,PROD_TYPE
+        ,DEAL_TYPE
+        ,ASSET_CLASS
+        ,DEPOSIT_LINKED_FLAG
+        ,OPTION_SWAP_FLAG
+        ,BULLION_FLAG
+        ,TOTAL_RETURN_SWAP_FLAG
+        ,TOTAL_INT_AMT
+        ,BANK_CUST_FLAG
+        ,OPT_POSN_TYPE
+        ,OPT_TYPE
+        ,OPT_STYL_CDE
+        ,TRADE_DT
+        ,MTUR_DT
+        ,VALUE_DT
+        ,FIXING_DT
+        ,KNOCKOUT_DT
+        ,NOTIONAL_CCY
+        ,NOTIONAL_AMT
+        ,OUTSTANDING_NOTIONAL_AMT
+        ,PREVIOUS_OUTSTANDING_NOTIONAL_AMT
+        ,PREM_CCY
+        ,PREM_AMT
+        ,PREM_SETL_DT
+        ,PREM_PAY_RECEIVE_FLAG
+        ,STRK_PRICE
+        ,MTM_CCY
+        ,CUR_MTM_AMT
+        ,PREVIOUS_MTM_AMT
+        ,UNDL_ISSUE_CDE
+        ,UNDL_ISSUE_CRNCY_CDE
+        ,UNDL_REUTERS_CDE
+        ,UNDL_ISIN_CDE
+        ,UNDL_CTRY_CDE
+        ,GUARANTOR_NUM
+        ,ISSUER_NUM
+        ,OPEN_DEAL_NUM
+        ,OPEN_DEAL_SB_NUM
+        ,LINK_DEAL_NUM
+        ,LINK_DEAL_SB_NUM
+        ,ADVANCE_PURPOSE_CODE
+        ,TEMPLATE_ISSUE_CODE
+        ,FINAL_FIXING_FLAG
+        ,CREAT_TS
+        ,RVRSE_TS
+        ,UPDT_TS
+    )
+    select
+        ND.ACTIVE_FLAG                                           AS ACTV_FLAG
+        ,ND.DEAL_NUMBER                                          AS DEAL_NUM
+        ,ND.DEAL_SUB_NUMBER                                      AS DEAL_SB_NUM
+        ,ND.DEAL_COMPANY_CODE                                    AS DEAL_COMP_CDE
+        ,ND.DEAL_BRANCH_CODE                                     AS DEAL_BRNCH_CDE
+        ,CASE WHEN ND.DEAL_TRANSACTION_TYPE = 'O' THEN 'S' ELSE 'P' END AS DEAL_TRAN_TYPE -- ND.CONSIDERATION_AMOUNT > 0 client rec premium,client sell, <0 client pay premium, client buy --bank view
+        ,ND.CUSTOMER_NUMBER                                      AS CUST_NUM
+        ,ND.SUB_ACCOUNT_NUMBER                                   AS SB_ACCT_NUM
+        ,'MM'                                                     AS PROD_TYPE
+        ,'MM'                                                     AS DEAL_TYPE
+        --,CASE WHEN NT.ASSET_TYPE IN ('FX','EQ','FI','IR','CD') THEN NT.ASSET_TYPE
+        ,CASE WHEN NT.ASSET_TYPE IN ('FX','EQ','FI','IR','CT') THEN NT.ASSET_TYPE --Amend by Allen on 23Oct2020
+              WHEN NT.ASSET_TYPE IN ('NX') THEN 'EQ'
+              WHEN NT.ASSET_TYPE IN ('CD') THEN 'CT' --Add by Allen on 23Oct2020
+              ELSE 'MX'
+         END                                                      AS ASSET_CLASS
+        ,'N'                                                      AS DEPOSIT_LINKED_FLAG
+        ,CASE WHEN COUNT_IR_LEG IS NOT NULL AND COUNT_IR_LEG = 2 THEN 'Y' ELSE 'N' END AS OPTION_SWAP_FLAG -- Y-Deposit linked / N-Otherwise
+        ,CASE WHEN UNDERLYING.UNDERLYING_ISSUE_CODE IS NOT NULL THEN INTERFACE.FN_GET_FTP_BULLION_FLAG('FX',LEFT(UNDERLYING_ISSUE_CODE,3),RIGHT(UNDERLYING_ISSUE_CODE,3))
+              ELSE CASE WHEN NT.NMEMO_CURRENCY_CODE = 'XAU' THEN '1'
+                        WHEN NT.NMEMO_CURRENCY_CODE = 'XAG' THEN '2'
+                        WHEN NT.NMEMO_CURRENCY_CODE = 'XPT' THEN '3'
+                        WHEN NT.NMEMO_CURRENCY_CODE = 'XPD' THEN '4'
+                        ELSE 0 END
+         END                                                      AS BULLION_FLAG
+        ,CASE WHEN NT.NMEMO_CODE IN ('TR4','TR5') AND NT.ASSET_TYPE = 'MX' AND NLU.UNDERLYING_CLASS_CODE IN ('EQ','NX') THEN 'Y' ELSE 'N' END AS TOTAL_RETURN_SWAP_FLAG -- for TRS of all types of underlying in the future, only limited to Equity Swap (including Equity Index) at the moment
+        ,0                                                        AS TOTAL_INT_AMT
+        ,'C'                                                      AS BANK_CUST_FLAG --Client
+        ,ND.DEAL_TRANSACTION_TYPE                                AS OPT_POSN_TYPE -- C,O CLOSE,OPEN
+        ,CASE WHEN NT.OPTION_TYPE IN ('C','P') THEN NT.OPTION_TYPE ELSE '' END AS OPT_TYPE
+        ,CASE WHEN NT.NMEMO_PAYOFF_STYLE = 'EURO' THEN 'E' ELSE 'A' END AS OPT_STYL_CDE
+        ,ND.NMEMO_TRADE_DATE                                     AS TRADE_DT
+        ,ND.NMEMO_DELIVERY_DATE                                  AS MTUR_DT
+        ,ND.NMEMO_VALUE_DATE                                     AS VALUE_DT
+        ,NT.NMEMO_EXPIRY_DATE                                    AS FIXING_DT
+        ,NULL                                                     AS KNOCKOUT_DT --TBC ???
+        ,CASE WHEN ND.NMEMO_CURRENCY_CODE = 'ASSET' THEN ND.SETTLEMENT_CURRENCY_CODE ELSE ND.NMEMO_CURRENCY_CODE END AS NOTIONAL_CCY
+        ,CASE WHEN ND.NMEMO_CURRENCY_CODE = 'ASSET' THEN ND.SETTLEMENT_NOTIONAL ELSE ND.NMEMO_NOMINAL END AS NOTIONAL_AMT
+        ,CASE WHEN ND.NMEMO_CURRENCY_CODE = 'ASSET' THEN ND.SETTLEMENT_NOTIONAL ELSE ND.NMEMO_NOMINAL END AS OUTSTANDING_NOTIONAL_AMT
+        ,0                                                        AS PREVIOUS_OUTSTANDING_NOTIONAL_AMT
+        ,ND.SETTLE_CURRENCY_CODE                                  AS PREM_CCY
+        ,ABS(ND.CONSIDERATION_AMOUNT)                             AS PREM_AMT --bullion plus
+        ,ND.NMEMO_VALUE_DATE                                      AS PREM_SETL_DT
+        ,CASE WHEN ND.CONSIDERATION_AMOUNT > 0 THEN 'P' ELSE 'R' END AS PREM_PAY_RECEIVE_FLAG --Bank view ND.CONSIDERATION_AMOUNT > 0 client rec, bank pay
+        ,CASE WHEN ORDER_DETAIL.FIELD_VALUE IS NOT NULL THEN CAST(REPLACE(ORDER_DETAIL.FIELD_VALUE,',','') AS DECIMAL(19,9)) ELSE 1 END AS STRK_PRICE
+        ,''                                                       AS MTM_CCY
+        ,0                                                        AS CUR_MTM_AMT
+        ,0                                                        AS PREVIOUS_MTM_AMT
+        ,CASE WHEN (NT.ASSET_TYPE = 'MX' AND NLU.UNDERLYING_CLASS_CODE = 'FX') OR NT.ASSET_TYPE = 'FX' THEN UNDERLYING.UNDERLYING_ISSUE_CODE ELSE '' END AS UNDL_ISSUE_CDE
+        ,''                                                       AS UNDL_ISSUE_CRNCY_CDE
+        ,''                                                       AS UNDL_REUTERS_CDE
+        ,NT.NMEMO_ISIN_CODE                                      AS UNDL_ISIN_CDE
+        ,''                                                       AS UNDL_CTRY_CDE -- SUPPLEMENTED/DB2_SYNTAX_FIX: target column exists between UNDL_ISIN_CDE and GUARANTOR_NUM; screenshots missed this select expression.
+        ,NTAD.GUARANTOR_NUMBER                                   AS GUARANTOR_NUM
+        ,NTAD.ISSUER_NUMBER                                      AS ISSUER_NUM
+        ,0                                                        AS OPEN_DEAL_NUM
+        ,0                                                        AS OPEN_DEAL_SB_NUM
+        ,ND.BROKER_DEAL_NUMBER                                   AS LINK_DEAL_NUM
+        ,ND.BROKER_DEAL_SUB_NUMBER                               AS LINK_DEAL_SB_NUM
+        ,CASE WHEN NT.ASSET_TYPE = 'MX' THEN DECODE(NLU.UNDERLYING_CLASS_CODE, 'NX', 'EQ', NLU.UNDERLYING_CLASS_CODE) ELSE '' END AS ADVANCE_PURPOSE_CODE -- Assume Index as Equity Index
+        ,NT.NMEMO_ISSUE_CODE                                     AS TEMPLATE_ISSUE_CODE
+        ,'N'                                                      AS FINAL_FIXING_FLAG --initial value 'N'
+        ,ND.CREATE_TIMESTAMP                                     AS CREAT_TS
+        ,ND.REVERSE_TIMESTAMP                                    AS RVRSE_TS
+        ,ND.UPDATE_TIMESTAMP                                     AS UPDT_TS
+    FROM FOS.NMEMO_DEAL ND
+    INNER JOIN FOS.NMEMO_TEMPLATE NT
+        ON NT.NMEMO_ISSUE_CODE = ND.NMEMO_ISSUE_CODE
+    LEFT OUTER JOIN FOS.NMEMO_ORDER_CLIENT_ORDER CLIENT_ORDER
+        ON ND.CUSTOMER_NUMBER = CLIENT_ORDER.CUSTOMER_NUMBER
+       AND ND.DEAL_NUMBER = CLIENT_ORDER.DEAL_NUMBER
+       AND ND.DEAL_SUB_NUMBER = CLIENT_ORDER.DEAL_SUB_NUMBER
+       AND ND.NMEMO_ISSUE_CODE = CLIENT_ORDER.NMEMO_ISSUE_CODE
+       AND CLIENT_ORDER.ORDER_TYPE = 'E'
+    LEFT OUTER JOIN FOS.NMEMO_ORDER_STATEMENT_DETAIL ORDER_DETAIL
+        ON CLIENT_ORDER.ORDER_NUMBER = ORDER_DETAIL.ORDER_NUMBER
+       AND CLIENT_ORDER.ORDER_SUB_NUMBER = ORDER_DETAIL.ORDER_SUB_NUMBER
+       AND ORDER_DETAIL.PRODUCT_CODE = NT.NMEMO_CODE
+       AND ORDER_DETAIL.FIELD_NAME = INTERFACE.FN_GET_CODE_MAP_VALUE('DATA','GENERIC_MEMO_FIELD_NAME',ORDER_DETAIL.PRODUCT_CODE,
+           '' /* SUPPLEMENTED/DB2_SYNTAX_FIX: OCR missing optional code-map parameters */,
+           '', '', '', '', '', '', '', '', '')
+    LEFT OUTER JOIN FOS.NMEMO_TEMPLATE_AGENT_DETAIL NTAD
+        ON NTAD.NMEMO_ISSUE_CODE = ND.NMEMO_ISSUE_CODE
+    LEFT OUTER JOIN (
+        SELECT ROW_NUMBER() OVER (PARTITION BY NMEMO_ISSUE_CODE ORDER BY SUM_UNDERLYING_WEIGHT desc) AS ROW_NUM,
+               NMEMO_ISSUE_CODE, UNDERLYING_ISSUE_CODE
+        FROM (
+            SELECT NMEMO_ISSUE_CODE, SUM(UNDERLYING_WEIGHT) AS SUM_UNDERLYING_WEIGHT, UNDERLYING_ISSUE_CODE
+            FROM FOS.NMEMO_LEG_UNDERLYING
+            WHERE UNDERLYING_CLASS_CODE = 'FX'
+            GROUP BY NMEMO_ISSUE_CODE, UNDERLYING_ISSUE_CODE
+        ) UNDERLYING
+    ) UNDERLYING
+        ON NT.NMEMO_ISSUE_CODE = UNDERLYING.NMEMO_ISSUE_CODE
+       AND UNDERLYING.ROW_NUM = 1
+    LEFT OUTER JOIN (
+        SELECT ROW_NUMBER() OVER (
+                   PARTITION BY NMEMO_ISSUE_CODE
+                   ORDER BY SUM_UNDERLYING_WEIGHT desc,
+                            CASE UNDERLYING_CLASS_CODE WHEN 'EQ' THEN 0 WHEN 'NX' THEN 0 WHEN 'WX' THEN 1 WHEN 'EX' THEN 2 WHEN 'IR' THEN 3 END
+               ) AS ROW_NUM,
+               NMEMO_ISSUE_CODE, UNDERLYING_CLASS_CODE
+        FROM (
+            SELECT NMEMO_ISSUE_CODE, SUM(UNDERLYING_WEIGHT) AS SUM_UNDERLYING_WEIGHT, UNDERLYING_CLASS_CODE
+            FROM FOS.NMEMO_LEG_UNDERLYING
+            GROUP BY NMEMO_ISSUE_CODE, UNDERLYING_CLASS_CODE
+        ) NLU
+    ) NLU
+        ON NLU.NMEMO_ISSUE_CODE = ND.NMEMO_ISSUE_CODE
+       AND NLU.ROW_NUM = 1
+    LEFT OUTER JOIN (
+        SELECT NMEMO_ISSUE_CODE, COUNT(*) AS COUNT_IR_LEG
+        FROM FOS.NMEMO_LEG_UNDERLYING
+        WHERE UNDERLYING_CLASS_CODE = 'IR'
+        GROUP BY NMEMO_ISSUE_CODE
+    ) IR
+        ON NT.NMEMO_ISSUE_CODE = IR.NMEMO_ISSUE_CODE
+    WHERE ND.active_flag = 'A'
+      AND NT.active_flag = 'A'
+      AND ND.DEAL_TRANSACTION_TYPE IN ('O','C')
+      AND NOT(ND.CREATE_TIMESTAMP IS NOT NULL AND ND.REVERSE_TIMESTAMP IS NOT NULL AND ND.CREATE_TIMESTAMP = ND.REVERSE_TIMESTAMP)
+      AND NOT EXISTS (
+          SELECT 1
+          FROM FOS.NMEMO_DEAL REVERSE_DEAL
+          WHERE REVERSE_DEAL.REVERSE_TIMESTAMP IS NOT NULL
+            AND ND.CUSTOMER_NUMBER = REVERSE_DEAL.CUSTOMER_NUMBER
+            AND ND.SUB_ACCOUNT_NUMBER = REVERSE_DEAL.SUB_ACCOUNT_NUMBER
+            AND ND.PRODUCT_TYPE = REVERSE_DEAL.PRODUCT_TYPE
+            AND ND.DEAL_NUMBER = REVERSE_DEAL.DEAL_NUMBER
+            AND ND.DEAL_SUB_NUMBER = REVERSE_DEAL.DEAL_SUB_NUMBER
+            AND ND.DEAL_TRANSACTION_TYPE = REVERSE_DEAL.DEAL_TRANSACTION_TYPE
+            AND ND.CREATE_TIMESTAMP = REVERSE_DEAL.CREATE_TIMESTAMP
+            AND ND.REVERSE_TIMESTAMP = REVERSE_DEAL.REVERSE_TIMESTAMP
+      );
+
+    SET ld_err_pos = 'Position: update FINAL_FIXING_FLAG for client';
+    Update INTERFACE.GM_COMMON_DEAL UPD_ND
+    set UPD_ND.FINAL_FIXING_FLAG = 'Y'
+    where UPD_ND.BANK_CUST_FLAG = 'C' and
+    exists
+    (
+        select 1
+        from
+        (
+            SELECT
+                ND.CUSTOMER_NUMBER              AS CUSTOMER_NUMBER
+                ,ND.SUB_ACCOUNT_NUMBER          AS SUB_ACCOUNT_NUMBER
+                ,PAYMENT.NMEMO_DEAL_NUMBER      AS FIXING_DEAL_NUMBER
+                ,PAYMENT.NMEMO_DEAL_SUB_NUMBER  AS FIXING_DEAL_SUB_NUMBER
+                ,PAYMENT.DEAL_NUMBER            AS DEAL_NUMBER
+                ,PAYMENT.DEAL_SUB_NUMBER        AS DEAL_SUB_NUMBER
+                ,ND.DEAL_TRANSACTION_TYPE
+            FROM FOS.NMEMO_DEAL ND
+            INNER JOIN FOS.NMEMO_TEMPLATE NT
+                ON NT.NMEMO_ISSUE_CODE = ND.NMEMO_ISSUE_CODE
+            INNER JOIN (
+                SELECT NP.* FROM FOS.NMEMO_PAYMENT NP
+                JOIN (
+                    SELECT MAX(FIXING_DATE) AS MAX_FIXING_DATE, MIN(COALESCE(REMAINING_SETTLEMENT_NOTIONAL,0)),
+                           CUSTOMER_NUMBER,SUB_ACCOUNT_NUMBER,DEAL_NUMBER,DEAL_SUB_NUMBER
+                    FROM FOS.NMEMO_PAYMENT
+                    WHERE REVERSE_TIMESTAMP IS NULL
+                      AND STATUS_FLAG IN ('CONFIRMED','PREV')
+                    GROUP BY CUSTOMER_NUMBER,SUB_ACCOUNT_NUMBER,DEAL_NUMBER,DEAL_SUB_NUMBER
+                ) AS latest_fixing
+                    ON NP.FIXING_DATE = latest_fixing.MAX_FIXING_DATE
+                   AND NP.CUSTOMER_NUMBER = latest_fixing.CUSTOMER_NUMBER
+                   AND NP.SUB_ACCOUNT_NUMBER = latest_fixing.SUB_ACCOUNT_NUMBER
+                   AND NP.DEAL_NUMBER = latest_fixing.DEAL_NUMBER
+                   AND NP.DEAL_SUB_NUMBER = latest_fixing.DEAL_SUB_NUMBER
+            ) PAYMENT
+                ON PAYMENT.CUSTOMER_NUMBER = ND.CUSTOMER_NUMBER
+               AND PAYMENT.SUB_ACCOUNT_NUMBER = ND.SUB_ACCOUNT_NUMBER
+               AND PAYMENT.NMEMO_DEAL_NUMBER = ND.DEAL_NUMBER
+               AND PAYMENT.NMEMO_DEAL_SUB_NUMBER = ND.DEAL_SUB_NUMBER
+            WHERE ND.ACTIVE_FLAG = 'A'
+              AND PAYMENT.ACTIVE_FLAG = 'A'
+              AND ND.DEAL_TRANSACTION_TYPE = 'F'
+              AND COALESCE(PAYMENT.REMAINING_SETTLEMENT_NOTIONAL,0) = 0
+              AND (
+                    PAYMENT.FIXING_EVENT_TYPE IN ('ER','M') --Knock out, Expiry --Added by Nancy on 26Jan2021 --Amended by Nancy on 17Mar2021
+                    OR PAYMENT.FIXING_DATE >= NT.NMEMO_EXPIRY_DATE --final fixing --Added by Nancy on 26Jan2021
+                  )
+        ) as FINAL_FIXING
+        where FINAL_FIXING.CUSTOMER_NUMBER = UPD_ND.CUST_NUM
+          AND FINAL_FIXING.SUB_ACCOUNT_NUMBER = UPD_ND.SB_ACCT_NUM
+          AND FINAL_FIXING.DEAL_NUMBER = UPD_ND.DEAL_NUM
+          AND FINAL_FIXING.DEAL_SUB_NUMBER = UPD_ND.DEAL_SB_NUM
+    );
+
+    SET ld_err_pos = 'Position: update OPEN_DEAL_NUM & OPEN_DEAL_SB_NUM for client';
+    --update OPEN_DEAL_NUM & OPEN_DEAL_SB_NUM
+    MERGE INTO INTERFACE.GM_COMMON_DEAL GCD
+    USING
+    (
+        SELECT
+            DEAL.CUSTOMER_NUMBER,
+            DEAL.SUB_ACCOUNT_NUMBER,
+            DEAL.DEAL_TYPE,
+            DEAL.DEAL_NUMBER,
+            MAX(DEAL.DEAL_SUB_NUMBER) AS DEAL_SUB_NUMBER,
+            DEAL.DEAL_TRANSACTION_TYPE
+        FROM FOS.NMEMO_DEAL DEAL
+        WHERE ((DEAL.DEAL_TRANSACTION_TYPE IN ('C') AND DEAL.REVERSE_TIMESTAMP IS NULL)
+            OR DEAL.DEAL_TRANSACTION_TYPE IN ('O'))
+        GROUP BY DEAL.CUSTOMER_NUMBER, DEAL.SUB_ACCOUNT_NUMBER, DEAL.DEAL_NUMBER, DEAL.DEAL_TRANSACTION_TYPE, DEAL.DEAL_TYPE
+    ) AS TGCD
+    ON
+        TGCD.CUSTOMER_NUMBER = GCD.CUST_NUM
+        AND TGCD.SUB_ACCOUNT_NUMBER = GCD.SB_ACCT_NUM
+        AND TGCD.DEAL_NUMBER = GCD.DEAL_NUM
+        AND TGCD.DEAL_SUB_NUMBER <> GCD.DEAL_SB_NUM
+        AND TGCD.DEAL_TRANSACTION_TYPE <> GCD.OPT_POSN_TYPE
+        AND GCD.OPT_POSN_TYPE IN ('O','C')
+        AND GCD.BANK_CUST_FLAG = 'C'
+    WHEN MATCHED THEN
+        UPDATE SET GCD.OPEN_DEAL_NUM = TGCD.DEAL_NUMBER, GCD.OPEN_DEAL_SB_NUM = TGCD.DEAL_SUB_NUMBER;
+
+    --Update PREVIOUS_OUTSTANDING_NOTIONAL_AMT
+    --1) if not exists in INTERFACE.GM_COMMON_DEAL_LASTDAY set PREVIOUS_OUTSTANDING_NOTIONAL_AMT = NOTIONAL_AMT * NMEMO_LEVERAGE_LEVEL
+    --2) if exists in INTERFACE.GM_COMMON_DEAL_LASTDAY then PREVIOUS_OUTSTANDING_NOTIONAL_AMT = lastday.OUTSTANDING_NOTIONAL_AMT
+    SET ld_err_pos = 'Position: update PREVIOUS_OUTSTANDING_NOTIONAL_AMT for client';
+    -- UPDATE INTERFACE.GM_COMMON_DEAL DEAL SET PREVIOUS_OUTSTANDING_NOTIONAL_AMT = NOTIONAL_AMT
+    -- WHERE BANK_CUST_FLAG = 'C' AND DATE(DEAL.CREAT_TS) = ld_biz_date
+    --   AND (DEAL.DEAL_NUM,DEAL.CUST_NUM,DEAL.SB_ACCT_NUM,DEAL.DEAL_SB_NUM,DEAL.PROD_TYPE,DEAL.ASSET_CLASS)
+    --   NOT IN (SELECT DEAL_NUM,CUST_NUM,SB_ACCT_NUM,DEAL_SB_NUM,PROD_TYPE,ASSET_CLASS FROM INTERFACE.GM_COMMON_DEAL_LASTDAY); --Amend by Allen on 10Nov2020
+
+UPDATE INTERFACE.GM_COMMON_DEAL DEAL SET DEAL.PREVIOUS_OUTSTANDING_NOTIONAL_AMT = DEAL.NOTIONAL_AMT * (SELECT DECODE(NT.NMEMO_LEVERAGE_LEVEL,0,1,COALESCE(NT.NMEMO_LEVERAGE_LEVEL,1)) FROM FOS.NMEMO_TEMPLATE NT
+    WHERE NT.NMEMO_ISSUE_CODE = DEAL.TEMPLATE_ISSUE_CODE )
+WHERE BANK_CUST_FLAG = 'C' AND DATE(DEAL.CREAT_TS) = ld_biz_date
+  AND (DEAL.DEAL_NUM, DEAL.CUST_NUM, DEAL.SB_ACCT_NUM, DEAL.DEAL_SB_NUM, DEAL.PROD_TYPE, DEAL.ASSET_CLASS)
+      NOT IN (SELECT DEAL_NUM,CUST_NUM,SB_ACCT_NUM,DEAL_SB_NUM,PROD_TYPE,ASSET_CLASS FROM INTERFACE.GM_COMMON_DEAL_LASTDAY);
+
+MERGE INTO INTERFACE.GM_COMMON_DEAL UPD_ND USING
+(
+    Select DEAL_NUM,CUST_NUM,SB_ACCT_NUM,DEAL_SB_NUM,PROD_TYPE,ASSET_CLASS,OUTSTANDING_NOTIONAL_AMT
+    from INTERFACE.GM_COMMON_DEAL_LASTDAY WHERE BANK_CUST_FLAG = 'C'
+)AS PREVIOUS_NOTIONAL ON
+    UPD_ND.DEAL_NUM = PREVIOUS_NOTIONAL.DEAL_NUM
+    and UPD_ND.CUST_NUM = PREVIOUS_NOTIONAL.CUST_NUM
+    and UPD_ND.SB_ACCT_NUM = PREVIOUS_NOTIONAL.SB_ACCT_NUM
+    and UPD_ND.DEAL_SB_NUM = PREVIOUS_NOTIONAL.DEAL_SB_NUM
+    and UPD_ND.PROD_TYPE = PREVIOUS_NOTIONAL.PROD_TYPE
+    and UPD_ND.ASSET_CLASS = PREVIOUS_NOTIONAL.ASSET_CLASS
+    AND UPD_ND.BANK_CUST_FLAG = 'C'
+WHEN MATCHED THEN
+    UPDATE SET UPD_ND.PREVIOUS_OUTSTANDING_NOTIONAL_AMT = PREVIOUS_NOTIONAL.OUTSTANDING_NOTIONAL_AMT;
+
+--update OUTSTANDING_NOTIONAL_AMT
+SET ld_err_pos = 'Position: update OUTSTANDING_NOTIONAL_AMT for client';
+--1)OUTSTANDING_NOTIONAL_AMT initial value is NOTIONAL_AMT
+--2)if have fixing deal, always get latest remaining_settlement_notional(max fixing date and min REMAINING_SETTLEMENT_NOTIONAL)
+MERGE INTO INTERFACE.GM_COMMON_DEAL UPD_ND USING
+(
+    SELECT
+        ND.CUSTOMER_NUMBER        AS CUSTOMER_NUMBER
+        ,ND.SUB_ACCOUNT_NUMBER    AS SUB_ACCOUNT_NUMBER
+        ,ND.DEAL_NUMBER           AS DEAL_NUMBER
+        ,ND.DEAL_SUB_NUMBER       AS DEAL_SUB_NUMBER
+        ,CASE WHEN ND.NMEMO_CURRENCY_CODE = 'ASSET' THEN ND.SETTLEMENT_CURRENCY_CODE ELSE ND.NMEMO_CURRENCY_CODE END
+                                  AS NOTIONAL_CCY
+        ,MAX(PAYMENT.FIXING_DATE) AS MAX_FIXING_DATE
+        ,CASE WHEN ND.NMEMO_CURRENCY_CODE = 'ASSET' THEN MIN(COALESCE(PAYMENT.REMAINING_SETTLEMENT_NOTIONAL,0)) ELSE MIN(COALESCE(PAYMENT.REMAINING_NMEMO_NOTIONAL,0)) END
+                                  AS CURRENT_NOTIONAL_AMT
+    FROM FOS.NMEMO_DEAL ND
+    INNER JOIN FOS.NMEMO_PAYMENT PAYMENT
+        ON PAYMENT.CUSTOMER_NUMBER = ND.CUSTOMER_NUMBER
+       AND PAYMENT.SUB_ACCOUNT_NUMBER = ND.SUB_ACCOUNT_NUMBER
+       AND PAYMENT.DEAL_NUMBER = ND.DEAL_NUMBER
+       AND PAYMENT.DEAL_SUB_NUMBER = ND.DEAL_SUB_NUMBER
+       AND PAYMENT.STATUS_FLAG IN ('CONFIRMED','PREV')
+    GROUP BY ND.CUSTOMER_NUMBER,ND.SUB_ACCOUNT_NUMBER,ND.DEAL_NUMBER,ND.DEAL_SUB_NUMBER,ND.NMEMO_CURRENCY_CODE,ND.SETTLEMENT_CURRENCY_CODE
+)AS CURRENT_NOTIONAL
+ON CURRENT_NOTIONAL.CUSTOMER_NUMBER = UPD_ND.CUST_NUM
+and CURRENT_NOTIONAL.SUB_ACCOUNT_NUMBER = UPD_ND.SB_ACCT_NUM
+and CURRENT_NOTIONAL.DEAL_NUMBER = UPD_ND.DEAL_NUM
+and CURRENT_NOTIONAL.DEAL_SUB_NUMBER = UPD_ND.DEAL_SB_NUM
+and CURRENT_NOTIONAL.NOTIONAL_CCY = UPD_ND.NOTIONAL_CCY
+AND UPD_ND.BANK_CUST_FLAG = 'C'
+WHEN MATCHED THEN
+    UPDATE SET UPD_ND.OUTSTANDING_NOTIONAL_AMT = CURRENT_NOTIONAL.CURRENT_NOTIONAL_AMT;
+
+--UPDATE OUTSTANDING_NOTIONAL_AMT,Add NMEMO_LEVERAGE_LEVEL --Add by Allen on 10Nov2020
+UPDATE INTERFACE.GM_COMMON_DEAL DEAL SET DEAL.OUTSTANDING_NOTIONAL_AMT = DEAL.OUTSTANDING_NOTIONAL_AMT * (SELECT DECODE(NT.NMEMO_LEVERAGE_LEVEL,0,1,COALESCE(NT.NMEMO_LEVERAGE_LEVEL,1)) FROM FOS.NMEMO_TEMPLATE NT
+    WHERE NT.NMEMO_ISSUE_CODE = DEAL.TEMPLATE_ISSUE_CODE )
+WHERE DEAL.BANK_CUST_FLAG = 'C';
+
+--UPDATE NOTIONAL_AMT,Add NMEMO_LEVERAGE_LEVEL --Add by Allen on 10Nov2020
+UPDATE INTERFACE.GM_COMMON_DEAL DEAL SET DEAL.NOTIONAL_AMT = DEAL.NOTIONAL_AMT * (SELECT DECODE(NT.NMEMO_LEVERAGE_LEVEL,0,1,COALESCE(NT.NMEMO_LEVERAGE_LEVEL,1)) FROM FOS.NMEMO_TEMPLATE NT
+    WHERE NT.NMEMO_ISSUE_CODE = DEAL.TEMPLATE_ISSUE_CODE )
+WHERE DEAL.BANK_CUST_FLAG = 'C';
+
+--Update MTM
+SET ld_err_pos = 'Position: update MTM for client';
+Merge into INTERFACE.GM_COMMON_DEAL gcd
+USING
+(
+    SELECT tgcd.DEAL_NUM,tgcd.CUST_NUM,tgcd.SB_ACCT_NUM,tgcd.DEAL_SB_NUM,tgcd.PROD_TYPE,tgcd.ASSET_CLASS,
+        CASE WHEN tgcd.FINAL_FIXING_FLAG = 'Y' THEN 0 ELSE MPP.MARKET_VALUE * -1 END AS CUR_MTM_AMT,
+        MPP.DEAL_CURRENCY_CODE AS MTM_CCY, COALESCE(MPPLD.MARKET_VALUE * -1, 0) as PREVIOUS_MTM_AMT
+    FROM INTERFACE.GM_COMMON_DEAL tgcd
+    INNER JOIN FOS.NMEMO_DEAL ND
+        ON tgcd.DEAL_NUM = ND.DEAL_NUMBER AND
+           tgcd.CUST_NUM = ND.CUSTOMER_NUMBER AND
+           tgcd.SB_ACCT_NUM = ND.SUB_ACCOUNT_NUMBER AND
+           tgcd.DEAL_SB_NUM = ND.DEAL_SUB_NUMBER
+    INNER JOIN FOS.NMEMO_TEMPLATE NT
+        ON ND.NMEMO_ISSUE_CODE = NT.NMEMO_ISSUE_CODE
+    INNER JOIN INTERFACE.MEMO_PRODUCT_POSITION MPP ON ND.CUSTOMER_NUMBER = MPP.CUSTOMER_NUMBER AND
+        ND.SUB_ACCOUNT_NUMBER = MPP.SUB_ACCOUNT_NUMBER AND
+        ND.DEAL_NUMBER = MPP.DEAL_NUMBER AND
+        ND.DEAL_SUB_NUMBER = MPP.DEAL_SUB_NUMBER AND
+        NT.NMEMO_CODE = MPP.PRODUCT_CODE AND
+        MPP.ACTIVE_FLAG = 'A'
+    LEFT OUTER JOIN INTERFACE.MEMO_PRODUCT_POSITION_LASTDAY MPPLD ON ND.CUSTOMER_NUMBER = MPPLD.CUSTOMER_NUMBER AND
+        ND.SUB_ACCOUNT_NUMBER = MPPLD.SUB_ACCOUNT_NUMBER AND
+        ND.DEAL_NUMBER = MPPLD.DEAL_NUMBER AND
+        ND.DEAL_SUB_NUMBER = MPPLD.DEAL_SUB_NUMBER AND
+        NT.NMEMO_CODE = MPPLD.PRODUCT_CODE AND
+        MPPLD.ACTIVE_FLAG = 'A'
+    WHERE ND.ACTIVE_FLAG = 'A'
+      AND NT.ACTIVE_FLAG = 'A'
+      AND MPP.ACTIVE_FLAG = 'A'
+)as tgcd
+    on tgcd.DEAL_NUM = gcd.DEAL_NUM
+   AND tgcd.CUST_NUM = gcd.CUST_NUM
+   AND tgcd.SB_ACCT_NUM = gcd.SB_ACCT_NUM
+   AND tgcd.DEAL_SB_NUM = gcd.DEAL_SB_NUM
+   AND tgcd.PROD_TYPE = gcd.PROD_TYPE
+   AND tgcd.ASSET_CLASS = gcd.ASSET_CLASS
+   AND gcd.BANK_CUST_FLAG = 'C'
+WHEN MATCHED THEN
+    UPDATE SET gcd.CUR_MTM_AMT = tgcd.CUR_MTM_AMT, gcd.MTM_CCY = tgcd.MTM_CCY, gcd.PREVIOUS_MTM_AMT = tgcd.PREVIOUS_MTM_AMT;
+
+--update KNOCKOUT_DT
+SET ld_err_pos = 'Position: update KNOCKOUT_DT for client';
+MERGE INTO INTERFACE.GM_COMMON_DEAL UPD_ND USING
+(
+    SELECT
+        ND.CUSTOMER_NUMBER
+        ,ND.SUB_ACCOUNT_NUMBER
+        ,ND.DEAL_NUMBER
+        ,ND.DEAL_SUB_NUMBER
+        ,PAYMENT.FIXING_DATE AS KNOCKOUT_DT
+    FROM FOS.NMEMO_DEAL ND
+    INNER JOIN FOS.NMEMO_PAYMENT PAYMENT
+        ON PAYMENT.CUSTOMER_NUMBER = ND.CUSTOMER_NUMBER
+       AND PAYMENT.SUB_ACCOUNT_NUMBER = ND.SUB_ACCOUNT_NUMBER
+       AND PAYMENT.DEAL_NUMBER = ND.DEAL_NUMBER
+       AND PAYMENT.DEAL_SUB_NUMBER = ND.DEAL_SUB_NUMBER
+       AND PAYMENT.PRODUCT_TYPE = ND.PRODUCT_TYPE
+       AND PAYMENT.STATUS_FLAG IN ('CONFIRMED','PREV')
+       AND PAYMENT.FIXING_EVENT_TYPE = 'ER'
+) AS KNOCKOUT ON (
+    KNOCKOUT.CUSTOMER_NUMBER = UPD_ND.CUST_NUM
+    and KNOCKOUT.SUB_ACCOUNT_NUMBER = UPD_ND.SB_ACCT_NUM
+    and KNOCKOUT.DEAL_NUMBER = UPD_ND.DEAL_NUM
+    and KNOCKOUT.DEAL_SUB_NUMBER = UPD_ND.DEAL_SB_NUM
+    AND UPD_ND.BANK_CUST_FLAG = 'C'
+)
+WHEN MATCHED THEN
+UPDATE SET UPD_ND.KNOCKOUT_DT = KNOCKOUT.KNOCKOUT_DT;
+
+--Update DEPOSIT_LINKED_FLAG, TOTAL_INT_AMT
+SET ld_err_pos = 'Position: update DEPOSIT_LINKED_FLAG, TOTAL_INT_AMT for client';
+MERGE INTO INTERFACE.GM_COMMON_DEAL UPD_ND USING
+(
+    SELECT
+        ND.CUSTOMER_NUMBER
+        ,ND.SUB_ACCOUNT_NUMBER
+        ,ND.DEAL_NUMBER
+        ,ND.DEAL_SUB_NUMBER
+        ,'Y' AS DEPOSIT_LINKED_FLAG
+        ,CASE WHEN COALESCE(DEPO.DEPO_STYLE,'') = 'ANNUAL' THEN COALESCE(DEAL.NOTIONAL_AMT,0) * (COALESCE(DEPO.DEPO_LEVEL,0)/100) * ((days(DEAL.FIXING_DT) - days(DEAL.VALUE_DT))/365)
+              WHEN COALESCE(DEPO.DEPO_STYLE,'') = 'PERIOD' THEN COALESCE(DEAL.NOTIONAL_AMT,0) * (COALESCE(DEPO.DEPO_LEVEL,0)/100)
+              ELSE 0 END AS TOTAL_INT_AMT
+    FROM FOS.NMEMO_DEAL ND
+    INNER JOIN INTERFACE.GM_COMMON_DEAL DEAL
+        ON ND.CUSTOMER_NUMBER = DEAL.CUST_NUM
+       and ND.SUB_ACCOUNT_NUMBER = DEAL.SB_ACCT_NUM
+       and ND.DEAL_NUMBER = DEAL.DEAL_NUM
+       and ND.DEAL_SUB_NUMBER = DEAL.DEAL_SB_NUM
+    INNER JOIN FOS.NMEMO_TEMPLATE_DEPO DEPO
+        ON DEPO.NMEMO_ISSUE_CODE = ND.NMEMO_ISSUE_CODE
+) AS DEPOSIT ON (
+    DEPOSIT.CUSTOMER_NUMBER = UPD_ND.CUST_NUM
+    AND DEPOSIT.SUB_ACCOUNT_NUMBER = UPD_ND.SB_ACCT_NUM
+    AND DEPOSIT.DEAL_NUMBER = UPD_ND.DEAL_NUM
+    AND DEPOSIT.DEAL_SUB_NUMBER = UPD_ND.DEAL_SB_NUM
+    AND UPD_ND.BANK_CUST_FLAG = 'C'
+)
+WHEN MATCHED THEN
+UPDATE SET UPD_ND.DEPOSIT_LINKED_FLAG = DEPOSIT.DEPOSIT_LINKED_FLAG,
+           UPD_ND.TOTAL_INT_AMT = DEPOSIT.TOTAL_INT_AMT;
+
+--Update Underlying Fields
+SET ld_err_pos = 'Position: update Underlying Fields for client';
+INSERT INTO SESSION.UNDERLYING_COUNT
+SELECT NT.NMEMO_ISSUE_CODE, COUNT(*)
+FROM FOS.NMEMO_TEMPLATE NT
+INNER JOIN FOS.NMEMO_LEG NL
+    ON NT.NMEMO_ISSUE_CODE = NL.NMEMO_ISSUE_CODE
+INNER JOIN FOS.NMEMO_LEG_UNDERLYING NLU
+    ON NL.NMEMO_ISSUE_CODE = NLU.NMEMO_ISSUE_CODE
+   AND NL.NMEMO_LEG_NUMBER = NLU.NMEMO_LEG_NUMBER
+WHERE NT.ACTIVE_FLAG = 'A'
+  AND NLU.ACTIVE_FLAG = 'A'
+  AND NL.ACTIVE_FLAG = 'A'
+GROUP BY NT.NMEMO_ISSUE_CODE;
+
+MERGE INTO INTERFACE.GM_COMMON_DEAL gcd
+USING
+(
+    SELECT tgcd.DEAL_NUM,tgcd.CUST_NUM,tgcd.SB_ACCT_NUM,tgcd.DEAL_SB_NUM,tgcd.PROD_TYPE,tgcd.ASSET_CLASS
+        ,NLU.UNDERLYING_ISSUE_CODE          AS UNDL_ISSUE_CDE
+        ,NLU.UNDERLYING_CURRENCY_CODE       AS UNDL_ISSUE_CRNCY_CDE
+        ,SI.REUTERS_CDE                     AS UNDL_REUTERS_CDE
+        ,NT.NMEMO_ISIN_CODE                 AS UNDL_ISIN_CDE
+        ,SI.SHARE_CTRY_CDE                  AS UNDL_CTRY_CDE
+    FROM INTERFACE.GM_COMMON_DEAL tgcd
+    INNER JOIN FOS.NMEMO_DEAL ND
+        ON tgcd.DEAL_NUM = ND.DEAL_NUMBER
+       AND tgcd.CUST_NUM = ND.CUSTOMER_NUMBER
+       AND tgcd.SB_ACCT_NUM = ND.SUB_ACCOUNT_NUMBER
+       AND tgcd.DEAL_SB_NUM = ND.DEAL_SUB_NUMBER
+    INNER JOIN FOS.NMEMO_TEMPLATE NT
+        ON ND.NMEMO_ISSUE_CODE = NT.NMEMO_ISSUE_CODE
+    INNER JOIN FOS.NMEMO_LEG NL
+        ON NT.NMEMO_ISSUE_CODE = NL.NMEMO_ISSUE_CODE
+    INNER JOIN FOS.NMEMO_LEG_UNDERLYING NLU
+        ON NL.NMEMO_ISSUE_CODE = NLU.NMEMO_ISSUE_CODE
+       AND NL.NMEMO_LEG_NUMBER = NLU.NMEMO_LEG_NUMBER
+    LEFT JOIN INTERFACE.SHARE_ISSUE SI
+        ON SI.SHARE_ISSUE_CDE = NLU.UNDERLYING_ISSUE_CODE
+    INNER JOIN SESSION.UNDERLYING_COUNT UC
+        ON UC.NMEMO_ISSUE_CODE = NT.NMEMO_ISSUE_CODE
+       AND UC.TOTAL_COUNT = 1
+    WHERE ND.ACTIVE_FLAG = 'A'
+      AND NT.ACTIVE_FLAG = 'A'
+      AND NLU.ACTIVE_FLAG = 'A'
+      AND NL.ACTIVE_FLAG = 'A'
+      AND NT.ASSET_TYPE IN ('EQ','NX')
+)AS tgcd
+    ON tgcd.DEAL_NUM = gcd.DEAL_NUM
+   AND tgcd.CUST_NUM = gcd.CUST_NUM
+   AND tgcd.SB_ACCT_NUM = gcd.SB_ACCT_NUM
+   AND tgcd.DEAL_SB_NUM = gcd.DEAL_SB_NUM
+   AND tgcd.PROD_TYPE = gcd.PROD_TYPE
+   AND tgcd.ASSET_CLASS = gcd.ASSET_CLASS
+   AND gcd.BANK_CUST_FLAG = 'C'
+WHEN MATCHED THEN
+    UPDATE SET gcd.UNDL_ISSUE_CDE = tgcd.UNDL_ISSUE_CDE, gcd.UNDL_ISSUE_CRNCY_CDE = tgcd.UNDL_ISSUE_CRNCY_CDE, gcd.UNDL_REUTERS_CDE = tgcd.UNDL_REUTERS_CDE
+              ,gcd.UNDL_ISIN_CDE = tgcd.UNDL_ISIN_CDE, gcd.UNDL_CTRY_CDE = tgcd.UNDL_CTRY_CDE;
+
+-- broker side
+SET ld_err_pos = 'Position: insert into INTERFACE.GM_COMMON_DEAL for broker';
+insert into INTERFACE.GM_COMMON_DEAL
+(
+    ACTV_FLAG
+    ,DEAL_NUM
+    ,DEAL_SB_NUM
+    ,DEAL_COMP_CDE
+    ,DEAL_BRNCH_CDE
+    ,DEAL_TRAN_TYPE
+    ,CUST_NUM
+    ,SB_ACCT_NUM
+    ,PROD_TYPE
+    ,DEAL_TYPE
+    ,ASSET_CLASS
+    ,DEPOSIT_LINKED_FLAG
+    ,OPTION_SWAP_FLAG
+    ,BULLION_FLAG
+    ,TOTAL_RETURN_SWAP_FLAG
+    ,TOTAL_INT_AMT
+    ,BANK_CUST_FLAG
+    ,OPT_POSN_TYPE
+    ,OPT_TYPE
+    ,OPT_STYL_CDE
+    ,TRADE_DT
+    ,MTUR_DT
+    ,VALUE_DT
+    ,FIXING_DT
+    ,KNOCKOUT_DT
+    ,NOTIONAL_CCY
+    ,NOTIONAL_AMT
+    ,OUTSTANDING_NOTIONAL_AMT
+    ,PREVIOUS_OUTSTANDING_NOTIONAL_AMT
+    ,PREM_CCY
+    ,PREM_AMT
+    ,PREM_SETL_DT
+    ,PREM_PAY_RECEIVE_FLAG
+    ,STRK_PRICE
+    ,MTM_CCY
+    ,CUR_MTM_AMT
+    ,PREVIOUS_MTM_AMT
+    ,UNDL_ISSUE_CDE
+    ,UNDL_ISSUE_CRNCY_CDE
+    ,UNDL_REUTERS_CDE
+    ,UNDL_ISIN_CDE
+    ,UNDL_CTRY_CDE
+    ,GUARANTOR_NUM
+    ,ISSUER_NUM
+    ,OPEN_DEAL_NUM
+    ,OPEN_DEAL_SB_NUM
+    ,LINK_DEAL_NUM
+    ,LINK_DEAL_SB_NUM
+    ,ADVANCE_PURPOSE_CODE
+    ,TEMPLATE_ISSUE_CODE
+    ,FINAL_FIXING_FLAG
+    ,CREAT_TS
+    ,RVRSE_TS
+    ,UPDT_TS
+    ,OUR_NOSTRO_NUMBER --add field by Nancy on 04Dec2020
+)
+select
+    BROKER_ND.ACTIVE_FLAG                                 AS ACTV_FLAG
+    ,BROKER_ND.DEAL_NUMBER                                AS DEAL_NUM
+    ,0                                                    AS DEAL_SB_NUM
+    ,CASE WHEN ls_region_code = 'SG' THEN '68' WHEN ls_region_code = 'HK' THEN '63' END
+                                                          AS DEAL_COMP_CDE
+    ,CASE WHEN ls_region_code = 'SG' THEN
+        --Amended by Ace Lai on 23Jun2021 begin
+        --CASE WHEN ls_local_ccy_code = NT.SETTLEMENT_CURRENCY THEN '02' ELSE '03' END
+        CASE WHEN (NT.ASSET_TYPE <> 'FX' AND (ls_local_ccy_code = NT.SETTLEMENT_CURRENCY OR ls_local_ccy_code = NT.NMEMO_CURRENCY_CODE)) THEN '02'
+             WHEN (NT.ASSET_TYPE = 'FX' AND ls_local_ccy_code = NT.SETTLEMENT_CURRENCY) THEN '02'
+             ELSE '03' END
+        --Amended by Ace Lai on 23Jun2021 end
+        WHEN ls_region_code = 'HK' THEN '02' END           AS DEAL_BRNCH_CDE
+    --,CASE WHEN BROKER_ND.CONSIDERATION_AMOUNT > 0 THEN 'S' ELSE 'P' END AS DEAL_TRAN_TYPE -- BROKER_ND.CONSIDERATION_AMOUNT > 0 bank rec premium from broker OR TT,<0 buy from client, --bank view
+    ,CASE WHEN BROKER_ND.DEAL_TRANSACTION_TYPE = 'O' THEN 'P' ELSE 'S' END AS DEAL_TRAN_TYPE -- ND.CONSIDERATION_AMOUNT > 0 client rec premium,client sell, <0 client pay premium, client buy --bank view
+    ,BROKER_ND.NMEMO_BROKER_NUMBER                        AS CUST_NUM
+    ,'0001'                                               AS SB_ACCT_NUM
+    ,'MM'                                                 AS PROD_TYPE
+    ,'MM'                                                 AS DEAL_TYPE
+    --,CASE WHEN NT.ASSET_TYPE IN ('FX','EQ','FI','IR','CD') THEN NT.ASSET_TYPE
+    ,CASE WHEN NT.ASSET_TYPE IN ('FX','EQ','FI','IR','CT') THEN NT.ASSET_TYPE --Amend by Allen on 23Oct2020
+          WHEN NT.ASSET_TYPE IN ('NX') THEN 'EQ'
+          WHEN NT.ASSET_TYPE IN ('CD') THEN 'CT' --Add by Allen on 23Oct2020
+          ELSE 'MX' END                                    AS ASSET_CLASS
+    ,'N'                                                  AS DEPOSIT_LINKED_FLAG --??? TBC
+    ,CASE WHEN COUNT_IR_LEG IS NOT NULL AND COUNT_IR_LEG = 2 THEN 'Y' ELSE 'N' END AS OPTION_SWAP_FLAG --??? TBC
+    ,CASE WHEN UNDERLYING.UNDERLYING_ISSUE_CODE IS NOT NULL THEN INTERFACE.FN_GET_FTP_BULLION_FLAG('FX',LEFT(UNDERLYING_ISSUE_CODE,3),RIGHT(UNDERLYING_ISSUE_CODE,3))
+          ELSE CASE WHEN NT.NMEMO_CURRENCY_CODE = 'XAU' THEN '1'
+                    WHEN NT.NMEMO_CURRENCY_CODE = 'XAG' THEN '2'
+                    WHEN NT.NMEMO_CURRENCY_CODE = 'XPT' THEN '3'
+                    WHEN NT.NMEMO_CURRENCY_CODE = 'XPD' THEN '4'
+                    ELSE 0 END
+     END                                                  AS BULLION_FLAG
+    ,CASE WHEN NT.NMEMO_CODE IN ('TR4','TR5') AND NT.ASSET_TYPE = 'MX' AND NLU.UNDERLYING_CLASS_CODE IN ('EQ','NX') THEN 'Y' ELSE 'N' END AS TOTAL_RETURN_SWAP_FLAG -- for TRS of all types of underlying in the future, only limited to Equity Swap (including Equity Index) at the moment
+    ,0                                                    AS TOTAL_INT_AMT --TBC
+    ,'B'                                                  AS BANK_CUST_FLAG --Bank
+    ,BROKER_ND.DEAL_TRANSACTION_TYPE                      AS OPT_POSN_TYPE
+    ,CASE WHEN NT.OPTION_TYPE IN ('C','P') THEN NT.OPTION_TYPE ELSE '' END
+                                                          AS OPT_TYPE
+    ,CASE WHEN NT.NMEMO_PAYOFF_STYLE = 'EURO' THEN 'E' ELSE 'A' END
+                                                          AS OPT_STYL_CDE
+    ,BROKER_ND.NMEMO_TRADE_DATE                           AS TRADE_DT
+    ,NT.NMEMO_DELIVERY_DATE                               AS MTUR_DT
+    ,BROKER_ND.NMEMO_VALUE_DATE                            AS VALUE_DT
+    ,NT.NMEMO_EXPIRY_DATE                                 AS FIXING_DT
+    ,NULL                                                 AS KNOCKOUT_DT
+    ,CASE WHEN NT.NMEMO_CURRENCY_CODE = 'ASSET' THEN NT.SETTLEMENT_CURRENCY ELSE NT.NMEMO_CURRENCY_CODE END
+                                                          AS NOTIONAL_CCY
+    ,CASE WHEN NT.NMEMO_CURRENCY_CODE = 'ASSET' THEN 0 ELSE BROKER_ND.NMEMO_NOMINAL END
+                                                          AS NOTIONAL_AMT --broker_deal.NMEMO_CURRENCY_CODE = NT.SETTLEMENT_CURRENCY
+    ,CASE WHEN NT.NMEMO_CURRENCY_CODE = 'ASSET' THEN 0 ELSE BROKER_ND.NMEMO_NOMINAL END
+                                                          AS OUTSTANDING_NOTIONAL_AMT -- SUPPLEMENTED/DB2_SYNTAX_FIX: OCR showed duplicate NOTIONAL_AMT; aligned to target column OUTSTANDING_NOTIONAL_AMT.
+    ,0                                                    AS PREVIOUS_OUTSTANDING_NOTIONAL_AMT --??? TBC
+    ,NT.SETTLEMENT_CURRENCY                               AS PREM_CCY -- settlement_ccy
+    ,ABS(BROKER_ND.CONSIDERATION_AMOUNT)                  AS PREM_AMT
+    ,BROKER_ND.NMEMO_VALUE_DATE                           AS PREM_SETL_DT -- value date
+    ,CASE WHEN BROKER_ND.CONSIDERATION_AMOUNT > 0 THEN 'R' ELSE 'P' END
+                                                          AS PREM_PAY_RECEIVE_FLAG -- Bank view consideration amount > 0 rec < 0 pay
+    ,CASE WHEN ORDER_DETAIL.FIELD_VALUE IS NOT NULL THEN CAST(REPLACE(ORDER_DETAIL.FIELD_VALUE,',','') AS DECIMAL(19,9)) ELSE 1 END AS STRK_PRICE
+    ,''                                                   AS MTM_CCY --??? TBC
+    ,0                                                    AS CUR_MTM_AMT --??? TBC --FOS.MEMO PRODUCT POSITION only has client data
+    ,0                                                    AS PREVIOUS_MTM_AMT --??? TBC
+    ,CASE WHEN (NT.ASSET_TYPE = 'MX' AND NLU.UNDERLYING_CLASS_CODE = 'FX') OR NT.ASSET_TYPE = 'FX' THEN UNDERLYING.UNDERLYING_ISSUE_CODE ELSE '' END AS UNDL_ISSUE_CDE
+    ,''                                                   AS UNDL_ISSUE_CRNCY_CDE
+    ,''                                                   AS UNDL_REUTERS_CDE
+    ,''                                                   AS UNDL_ISIN_CDE
+    ,''                                                   AS UNDL_CTRY_CDE
+    ,NTAD.GUARANTOR_NUMBER                                AS GUARANTOR_NUM
+    ,NTAD.ISSUER_NUMBER                                   AS ISSUER_NUM
+    ,0                                                    AS OPEN_DEAL_NUM
+    ,0                                                    AS OPEN_DEAL_SB_NUM
+    ,0                                                    AS LINK_DEAL_NUM -- exists 1 bank : n client, so set 0
+    ,0                                                    AS LINK_DEAL_SB_NUM -- client deal num
+    ,CASE WHEN NT.ASSET_TYPE = 'MX' THEN DECODE(NLU.UNDERLYING_CLASS_CODE, 'NX', 'EQ', NLU.UNDERLYING_CLASS_CODE) ELSE '' END AS ADVANCE_PURPOSE_CODE -- Assume Index as Equity Index
+    ,BROKER_ND.NMEMO_ISSUE_CODE                           AS TEMPLATE_ISSUE_CODE
+    ,'N'                                                  AS FINAL_FIXING_FLAG --initial value
+    ,BROKER_ND.CREATE_TIMESTAMP                           AS CREAT_TS
+    ,BROKER_ND.REVERSE_TIMESTAMP                          AS RVRSE_TS
+    ,BROKER_ND.UPDATE_TIMESTAMP                           AS UPDT_TS
+    ,BROKER_ND.OUR_NOSTRO_NUMBER                          AS OUR_NOSTRO_NUMBER --add field by Nancy on 04Dec2020
+FROM FOS.NMEMO_BROKER_DEAL BROKER_ND --NMEMO_BROKER_NUMBER,DEAL_NUMBER,NMEMO_ISSUE_CODE,DEAL_TRANSACTION_TYPE
+INNER JOIN FOS.NMEMO_TEMPLATE NT
+    ON NT.NMEMO_ISSUE_CODE = BROKER_ND.NMEMO_ISSUE_CODE
+LEFT OUTER JOIN FOS.NMEMO_BANK_ORDER BANK_ORDER
+    ON BROKER_ND.NMEMO_BROKER_NUMBER = BANK_ORDER.COUNTERPARTY_NUMBER
+   AND BROKER_ND.DEAL_NUMBER = BANK_ORDER.BANK_DEAL_NUMBER
+   AND BROKER_ND.NMEMO_ISSUE_CODE = BANK_ORDER.NMEMO_ISSUE_CODE
+   AND BROKER_ND.DEAL_TRANSACTION_TYPE = BANK_ORDER.ORDER_TRANSACTION_TYPE
+LEFT OUTER JOIN (
+    SELECT ROW_NUMBER() OVER (PARTITION BY BANK_ORDER_NUMBER,BANK_ORDER_SUB_NUMBER,ORDER_TRANSACTION_TYPE ORDER BY CREATE_TIMESTAMP desc) AS ROW_NUM,
+           BANK_ORDER_NUMBER,BANK_ORDER_SUB_NUMBER,ORDER_TRANSACTION_TYPE,ORDER_NUMBER,ORDER_SUB_NUMBER
+    FROM FOS.NMEMO_ORDER WHERE ORDER_TYPE = 'E'
+) CLIENT_ORDER
+    ON BANK_ORDER.BANK_ORDER_NUMBER = CLIENT_ORDER.BANK_ORDER_NUMBER
+   AND BANK_ORDER.BANK_ORDER_SUB_NUMBER = CLIENT_ORDER.BANK_ORDER_SUB_NUMBER
+   AND BANK_ORDER.ORDER_TRANSACTION_TYPE = CLIENT_ORDER.ORDER_TRANSACTION_TYPE
+   AND CLIENT_ORDER.ROW_NUM = 1
+LEFT OUTER JOIN FOS.NMEMO_ORDER_STATEMENT_DETAIL ORDER_DETAIL
+    ON CLIENT_ORDER.ORDER_NUMBER = ORDER_DETAIL.ORDER_NUMBER
+   AND CLIENT_ORDER.ORDER_SUB_NUMBER = ORDER_DETAIL.ORDER_SUB_NUMBER
+   AND ORDER_DETAIL.PRODUCT_CODE = NT.NMEMO_CODE
+   AND ORDER_DETAIL.FIELD_NAME = INTERFACE.FN_GET_CODE_MAP_VALUE('DATA','GENERIC_MEMO_FIELD_NAME',ORDER_DETAIL.PRODUCT_CODE,
+           '' /* SUPPLEMENTED/DB2_SYNTAX_FIX: OCR missing optional code-map parameters */,
+           '', '', '', '', '', '', '', '', '')
+LEFT OUTER JOIN FOS.NMEMO_TEMPLATE_AGENT_DETAIL NTAD
+    ON NTAD.NMEMO_ISSUE_CODE = BROKER_ND.NMEMO_ISSUE_CODE
+LEFT OUTER JOIN (
+    SELECT ROW_NUMBER() OVER (PARTITION BY NMEMO_ISSUE_CODE ORDER BY SUM_UNDERLYING_WEIGHT desc) AS ROW_NUM,
+           NMEMO_ISSUE_CODE, UNDERLYING_ISSUE_CODE
+    FROM (
+        SELECT NMEMO_ISSUE_CODE, SUM(UNDERLYING_WEIGHT) AS SUM_UNDERLYING_WEIGHT, UNDERLYING_ISSUE_CODE
+        FROM FOS.NMEMO_LEG_UNDERLYING WHERE UNDERLYING_CLASS_CODE = 'FX'
+        GROUP BY NMEMO_ISSUE_CODE, UNDERLYING_ISSUE_CODE
+    ) UNDERLYING
+) UNDERLYING
+    ON NT.NMEMO_ISSUE_CODE = UNDERLYING.NMEMO_ISSUE_CODE
+   AND UNDERLYING.ROW_NUM = 1
+LEFT OUTER JOIN (
+    SELECT ROW_NUMBER() OVER (
+        PARTITION BY NMEMO_ISSUE_CODE
+        ORDER BY SUM_UNDERLYING_WEIGHT desc,
+        CASE UNDERLYING_CLASS_CODE WHEN 'EQ' THEN 0 WHEN 'NX' THEN 0 WHEN 'WX' THEN 1 WHEN 'FX' THEN 2 WHEN 'IR' THEN 3 END
+    ) AS ROW_NUM,NMEMO_ISSUE_CODE,UNDERLYING_CLASS_CODE
+    FROM (
+        SELECT NMEMO_ISSUE_CODE, SUM(UNDERLYING_WEIGHT) AS SUM_UNDERLYING_WEIGHT, UNDERLYING_CLASS_CODE
+        FROM FOS.NMEMO_LEG_UNDERLYING
+        GROUP BY NMEMO_ISSUE_CODE,UNDERLYING_CLASS_CODE
+    ) NLU
+) NLU
+    ON NLU.NMEMO_ISSUE_CODE = BROKER_ND.NMEMO_ISSUE_CODE
+   AND NLU.ROW_NUM = 1
+LEFT OUTER JOIN (
+    SELECT NMEMO_ISSUE_CODE, COUNT(1) AS COUNT_IR_LEG
+    FROM FOS.NMEMO_LEG_UNDERLYING
+    WHERE UNDERLYING_CLASS_CODE = 'IR'
+    GROUP BY NMEMO_ISSUE_CODE
+) IR
+    ON NT.NMEMO_ISSUE_CODE = IR.NMEMO_ISSUE_CODE
+WHERE BROKER_ND.ACTIVE_FLAG = 'A'
+  AND NT.ACTIVE_FLAG = 'A'
+  AND BROKER_ND.DEAL_TRANSACTION_TYPE IN ('O','C')
+  AND NOT(BROKER_ND.CREATE_TIMESTAMP IS NOT NULL AND BROKER_ND.REVERSE_TIMESTAMP IS NOT NULL AND BROKER_ND.CREATE_TIMESTAMP = BROKER_ND.REVERSE_TIMESTAMP);
+
+--update FINAL_FIXING_FLAG
+SET ld_err_pos = 'Position: update FINAL_FIXING_FLAG for broker';
+Update INTERFACE.GM_COMMON_DEAL UPD_DEAL
+Set UPD_DEAL.FINAL_FIXING_FLAG = 'Y'
+where UPD_DEAL.BANK_CUST_FLAG = 'B'
+and exists
+(
+    SELECT 1 FROM
+    (
+        SELECT
+            DEAL.NMEMO_BROKER_NUMBER      AS CUSTOMER_NUMBER
+            ,'0001'                       AS SUB_ACCOUNT_NUMBER
+            ,PAYMENT.BANK_DEAL_NUMBER     AS DEAL_NUMBER
+            ,PAYMENT.BANK_DEAL_SUB_NUMBER AS DEAL_SUB_NUMBER
+            ,DEAL.DEAL_TRANSACTION_TYPE
+        FROM FOS.NMEMO_BROKER_DEAL DEAL
+        INNER JOIN FOS.NMEMO_TEMPLATE NT
+            ON NT.NMEMO_ISSUE_CODE = DEAL.NMEMO_ISSUE_CODE
+        JOIN (SELECT NBP.* FROM FOS.NMEMO_BANK_PAYMENT NBP JOIN (
+            SELECT MAX(FIXING_DATE) AS MAX_FIXING_DATE, MIN(COALESCE(REMAINING_SETTLEMENT_NOTIONAL,0)),
+                   BROKER_NUMBER, BANK_DEAL_NUMBER, BANK_DEAL_SUB_NUMBER
+            FROM FOS.NMEMO_BANK_PAYMENT
+            WHERE REVERSE_TIMESTAMP IS NULL AND STATUS_FLAG IN ('CONFIRMED','PREV')
+            GROUP BY BROKER_NUMBER, BANK_DEAL_NUMBER, BANK_DEAL_SUB_NUMBER
+        ) latest_fixing
+            ON NBP.FIXING_DATE = latest_fixing.MAX_FIXING_DATE
+           AND NBP.BROKER_NUMBER = latest_fixing.BROKER_NUMBER
+           AND NBP.BANK_DEAL_NUMBER = latest_fixing.BANK_DEAL_NUMBER
+           AND NBP.BANK_DEAL_SUB_NUMBER = latest_fixing.BANK_DEAL_SUB_NUMBER
+        ) PAYMENT
+            ON PAYMENT.BROKER_NUMBER = DEAL.NMEMO_BROKER_NUMBER
+           AND PAYMENT.NMEMO_BANK_DEAL_NUMBER = DEAL.DEAL_NUMBER
+           AND PAYMENT.NMEMO_BANK_DEAL_SUB_NUMBER = 0
+           AND PAYMENT.NMEMO_ISSUE_CODE = DEAL.NMEMO_ISSUE_CODE
+        WHERE DEAL.ACTIVE_FLAG = 'A'
+          AND PAYMENT.ACTIVE_FLAG = 'A'
+          AND DEAL.DEAL_TRANSACTION_TYPE = 'F'
+          AND COALESCE(PAYMENT.REMAINING_SETTLEMENT_NOTIONAL,0) = 0
+          AND (PAYMENT.FIXING_EVENT_TYPE IN ('ER','M') --Knock out,Expiry --Added by Nancy on 26Jan2021 --Amended by Nancy on 17Mar2021
+               OR PAYMENT.FIXING_DATE >= NT.NMEMO_EXPIRY_DATE) --final fixing --Added by Nancy on 26Jan2021
+    )AS FINAL_FIXING
+    WHERE FINAL_FIXING.CUSTOMER_NUMBER = UPD_DEAL.CUST_NUM
+      AND FINAL_FIXING.SUB_ACCOUNT_NUMBER = UPD_DEAL.SB_ACCT_NUM
+      AND FINAL_FIXING.DEAL_NUMBER = UPD_DEAL.DEAL_NUM
+      AND FINAL_FIXING.DEAL_SUB_NUMBER = UPD_DEAL.DEAL_SB_NUM
+);
+
+--update OPEN_DEAL_NUM & OPEN_DEAL_SB_NUM
+SET ld_err_pos = 'Position: update OPEN_DEAL_NUM & OPEN_DEAL_SB_NUM for broker';
+--update open_deal_num for open deal
+MERGE INTO INTERFACE.GM_COMMON_DEAL UPD_ND USING
+(
+    SELECT
+        BROKER_DEAL.NMEMO_BROKER_NUMBER AS CUST_NUM,
+        BROKER_DEAL.DEAL_NUMBER AS OPEN_DEAL_NUM,
+        BROKER_DEAL.NMEMO_ISSUE_CODE,
+        BROKER_DEAL.DEAL_TRANSACTION_TYPE,
+        CLIENT_ORDER_OPEN.DEAL_NUMBER AS DEAL_NUM
+    FROM FOS.NMEMO_BROKER_DEAL BROKER_DEAL
+    INNER JOIN FOS.NMEMO_BANK_ORDER BANK_ORDER
+        ON BROKER_DEAL.NMEMO_BROKER_NUMBER = BANK_ORDER.COUNTERPARTY_NUMBER
+       AND BROKER_DEAL.DEAL_NUMBER = BANK_ORDER.BANK_DEAL_NUMBER
+       AND BROKER_DEAL.NMEMO_ISSUE_CODE = BANK_ORDER.NMEMO_ISSUE_CODE
+       AND BROKER_DEAL.DEAL_TRANSACTION_TYPE = BANK_ORDER.ORDER_TRANSACTION_TYPE
+    INNER JOIN FOS.NMEMO_ORDER CLIENT_ORDER_CLOSE
+        ON BANK_ORDER.BANK_ORDER_NUMBER = CLIENT_ORDER_CLOSE.BANK_ORDER_NUMBER
+       AND BANK_ORDER.BANK_ORDER_SUB_NUMBER = CLIENT_ORDER_CLOSE.BANK_ORDER_SUB_NUMBER
+       AND BANK_ORDER.ORDER_TRANSACTION_TYPE = CLIENT_ORDER_CLOSE.ORDER_TRANSACTION_TYPE
+       AND CLIENT_ORDER_CLOSE.ORDER_TRANSACTION_TYPE = 'C'
+    INNER JOIN FOS.NMEMO_ORDER CLIENT_ORDER_OPEN
+        ON CLIENT_ORDER_CLOSE.ORIGINAL_ORDER_NUMBER = CLIENT_ORDER_OPEN.ORIGINAL_ORDER_NUMBER
+       AND CLIENT_ORDER_CLOSE.ORIGINAL_ORDER_SUB_NUMBER = CLIENT_ORDER_OPEN.ORIGINAL_ORDER_SUB_NUMBER
+       AND CLIENT_ORDER_CLOSE.DEAL_NUMBER = CLIENT_ORDER_OPEN.DEAL_NUMBER
+       AND CLIENT_ORDER_OPEN.ORDER_TRANSACTION_TYPE = 'O'
+    INNER JOIN FOS.NMEMO_TEMPLATE NMEMO_TEMPLATE
+        ON NMEMO_TEMPLATE.NMEMO_ISSUE_CODE = BROKER_DEAL.NMEMO_ISSUE_CODE
+    WHERE BROKER_DEAL.DEAL_TRANSACTION_TYPE IN ('C')
+      AND BROKER_DEAL.REVERSE_TIMESTAMP IS NULL
+) AS BROKER_DEAL ON (
+    BROKER_DEAL.CUST_NUM = UPD_ND.CUST_NUM
+    AND BROKER_DEAL.DEAL_NUM = UPD_ND.DEAL_NUM
+    AND BROKER_DEAL.NMEMO_ISSUE_CODE = UPD_ND.TEMPLATE_ISSUE_CODE
+    AND UPD_ND.OPT_POSN_TYPE = 'O'
+    AND UPD_ND.BANK_CUST_FLAG = 'B'
+)
+WHEN MATCHED THEN
+-- SUPPLEMENTED/DB2_SYNTAX_FIX: no additional executable line is required here; this UPDATE SET is the continuation of the visible WHEN MATCHED THEN.
+UPDATE SET UPD_ND.OPEN_DEAL_NUM      = BROKER_DEAL.OPEN_DEAL_NUM
+          ,UPD_ND.OPEN_DEAL_SB_NUM  = 0;
+
+--update MTM_CCY, CUR_MTM_AMT, PREVIOUS_MTM_AMT
+SET ld_err_pos = 'Position: update MTM for broker';
+--FOS.MEMO_PRODUCT_POSITION only has client data
+MERGE INTO INTERFACE.GM_COMMON_DEAL UPD_ND USING
+(
+    SELECT
+        DEAL.ASSET_CLASS
+        ,DEAL.LINK_DEAL_NUM
+        ,DEAL.LINK_DEAL_SB_NUM
+        ,DEAL.DEAL_COMP_CDE
+        ,DEAL.DEAL_BRNCH_CDE
+        ,DEAL.MTM_CCY
+        ,SUM(DEAL.CUR_MTM_AMT) AS CUR_MTM_AMT
+        ,SUM(DEAL.PREVIOUS_MTM_AMT) AS PREVIOUS_MTM_AMT
+    FROM INTERFACE.GM_COMMON_DEAL DEAL
+    WHERE DEAL.BANK_CUST_FLAG = 'C'
+    GROUP BY DEAL.ASSET_CLASS,DEAL.LINK_DEAL_NUM,DEAL.LINK_DEAL_SB_NUM,DEAL.DEAL_COMP_CDE ,DEAL.DEAL_BRNCH_CDE,DEAL.MTM_CCY
+) AS CLIENT_DEAL ON (
+    CLIENT_DEAL.LINK_DEAL_NUM       = UPD_ND.DEAL_NUM
+    AND CLIENT_DEAL.LINK_DEAL_SB_NUM = UPD_ND.DEAL_SB_NUM
+    AND CLIENT_DEAL.ASSET_CLASS      = UPD_ND.ASSET_CLASS
+    AND UPD_ND.BANK_CUST_FLAG        = 'B'
+)
+WHEN MATCHED THEN
+UPDATE SET UPD_ND.MTM_CCY          = CLIENT_DEAL.MTM_CCY
+          ,UPD_ND.CUR_MTM_AMT     = -CLIENT_DEAL.CUR_MTM_AMT
+          ,UPD_ND.PREVIOUS_MTM_AMT = -CLIENT_DEAL.PREVIOUS_MTM_AMT;
+
+SET ld_err_pos = 'Position: update NOTIONAL_AMT when NMEMO_CURRENCY_CODE is ASSET for broker ';
+-- UPDATE NOTIONAL_AMT
+MERGE INTO INTERFACE.GM_COMMON_DEAL UPD_ND USING
+(
+    SELECT
+        DEAL.ASSET_CLASS
+        ,DEAL.LINK_DEAL_NUM
+        ,DEAL.LINK_DEAL_SB_NUM
+        ,SUM(DEAL.NOTIONAL_AMT) AS NOTIONAL_AMT
+    FROM INTERFACE.GM_COMMON_DEAL DEAL
+    INNER JOIN FOS.NMEMO_TEMPLATE NT
+        ON NT.NMEMO_ISSUE_CODE = DEAL.TEMPLATE_ISSUE_CODE
+    WHERE DEAL.BANK_CUST_FLAG = 'C'
+      AND NT.NMEMO_CURRENCY_CODE = 'ASSET'
+    GROUP BY DEAL.ASSET_CLASS,DEAL.LINK_DEAL_NUM,DEAL.LINK_DEAL_SB_NUM --,DEAL.DEAL_COMP_CDE ,DEAL.DEAL_BRNCH_CDE
+) AS CLIENT_DEAL ON (
+    CLIENT_DEAL.LINK_DEAL_NUM       = UPD_ND.DEAL_NUM
+    and CLIENT_DEAL.LINK_DEAL_SB_NUM = UPD_ND.DEAL_SB_NUM
+    and CLIENT_DEAL.ASSET_CLASS      = UPD_ND.ASSET_CLASS
+    AND UPD_ND.BANK_CUST_FLAG        = 'B'
+)
+WHEN MATCHED THEN
+UPDATE SET UPD_ND.NOTIONAL_AMT             = CLIENT_DEAL.NOTIONAL_AMT
+          ,UPD_ND.OUTSTANDING_NOTIONAL_AMT = CLIENT_DEAL.NOTIONAL_AMT;
+
+--Update PREVIOUS_OUTSTANDING_NOTIONAL_AMT
+--1) if exists in INTERFACE.GM_COMMON_DEAL_LASTDAY then PREVIOUS_OUTSTANDING_NOTIONAL_AMT = lastday.OUTSTANDING_NOTIONAL_AMT
+--2) if not exists in INTERFACE.GM_COMMON_DEAL_LASTDAY set PREVIOUS_OUTSTANDING_NOTIONAL_AMT = NOTIONAL_AMT * NMEMO_LEVERAGE_LEVEL
+SET ld_err_pos = 'Position: update PREVIOUS_OUTSTANDING_NOTIONAL_AMT for broker';
+-- UPDATE INTERFACE.GM_COMMON_DEAL DEAL SET PREVIOUS_OUTSTANDING_NOTIONAL_AMT = NOTIONAL_AMT
+-- WHERE BANK_CUST_FLAG = 'B' AND DATE(DEAL.CREAT_TS) = ld_biz_date
+--   AND (DEAL.DEAL_NUM,DEAL.CUST_NUM,DEAL.SB_ACCT_NUM,DEAL.DEAL_SB_NUM,DEAL.PROD_TYPE,DEAL.ASSET_CLASS)
+--       NOT IN (SELECT DEAL_NUM,CUST_NUM,SB_ACCT_NUM,DEAL_SB_NUM,PROD_TYPE,ASSET_CLASS FROM INTERFACE.GM_COMMON_DEAL_LASTDAY); --Amend by Allen on 10Nov2020
+
+UPDATE INTERFACE.GM_COMMON_DEAL DEAL SET DEAL.PREVIOUS_OUTSTANDING_NOTIONAL_AMT = DEAL.NOTIONAL_AMT * ( SELECT DECODE(NT.NMEMO_LEVERAGE_LEVEL,0,1,COALESCE(NT.NMEMO_LEVERAGE_LEVEL,1)) FROM FOS.NMEMO_TEMPLATE NT
+    WHERE NT.NMEMO_ISSUE_CODE = DEAL.TEMPLATE_ISSUE_CODE )
+WHERE BANK_CUST_FLAG = 'B' AND DATE(DEAL.CREAT_TS) = ld_biz_date
+  AND (DEAL.DEAL_NUM,DEAL.CUST_NUM,DEAL.SB_ACCT_NUM,DEAL.DEAL_SB_NUM,DEAL.PROD_TYPE,DEAL.ASSET_CLASS)
+      NOT IN (SELECT DEAL_NUM,CUST_NUM,SB_ACCT_NUM,DEAL_SB_NUM,PROD_TYPE,ASSET_CLASS FROM INTERFACE.GM_COMMON_DEAL_LASTDAY);
+
+MERGE INTO INTERFACE.GM_COMMON_DEAL UPD_ND USING
+(
+    SELECT DEAL_NUM,CUST_NUM,SB_ACCT_NUM,DEAL_SB_NUM,PROD_TYPE,ASSET_CLASS,OUTSTANDING_NOTIONAL_AMT
+    FROM INTERFACE.GM_COMMON_DEAL_LASTDAY WHERE BANK_CUST_FLAG = 'B'
+)AS PREVIOUS_NOTIONAL ON
+    UPD_ND.DEAL_NUM     = PREVIOUS_NOTIONAL.DEAL_NUM
+    AND UPD_ND.CUST_NUM = PREVIOUS_NOTIONAL.CUST_NUM
+    AND UPD_ND.SB_ACCT_NUM = PREVIOUS_NOTIONAL.SB_ACCT_NUM
+    AND UPD_ND.DEAL_SB_NUM = PREVIOUS_NOTIONAL.DEAL_SB_NUM
+    AND UPD_ND.PROD_TYPE = PREVIOUS_NOTIONAL.PROD_TYPE
+    AND UPD_ND.ASSET_CLASS = PREVIOUS_NOTIONAL.ASSET_CLASS
+    AND UPD_ND.BANK_CUST_FLAG = 'B'
+WHEN MATCHED THEN
+    UPDATE SET UPD_ND.PREVIOUS_OUTSTANDING_NOTIONAL_AMT = PREVIOUS_NOTIONAL.OUTSTANDING_NOTIONAL_AMT;
+
+--Update OUTSTANDING_NOTIONAL_AMT
+--1)OUTSTANDING_NOTIONAL_AMT initial value is NOTIONAL_AMT
+--2)if have fixing deal, always get latest remaining_settlement_notional(max fixing date and min REMAINING_SETTLEMENT_NOTIONAL)
+SET ld_err_pos = 'Position: update OUTSTANDING_NOTIONAL_AMT for broker';
+MERGE INTO INTERFACE.GM_COMMON_DEAL UPD_DEAL USING
+(
+    SELECT
+        DEAL.NMEMO_BROKER_NUMBER AS CUSTOMER_NUMBER
+        ,'0001' AS SUB_ACCOUNT_NUMBER
+        ,PAYMENT.BANK_DEAL_NUMBER AS DEAL_NUMBER
+        ,PAYMENT.BANK_DEAL_SUB_NUMBER AS DEAL_SUB_NUMBER
+        ,CASE WHEN NT.NMEMO_CURRENCY_CODE = 'ASSET' THEN NT.SETTLEMENT_CURRENCY ELSE NT.NMEMO_CURRENCY_CODE END
+            AS NOTIONAL_CCY
+        ,MAX(PAYMENT.FIXING_DATE) AS MAX_FIXING_DATE
+        ,CASE WHEN NT.NMEMO_CURRENCY_CODE = 'ASSET' THEN MIN(COALESCE(PAYMENT.REMAINING_SETTLEMENT_NOTIONAL,0)) ELSE MIN(COALESCE(PAYMENT.REMAINING_NMEMO_NOTIONAL,0)) END
+            AS CURRENT_NOTIONAL_AMT
+    FROM FOS.NMEMO_BROKER_DEAL DEAL
+    INNER JOIN FOS.NMEMO_TEMPLATE NT
+        ON NT.NMEMO_ISSUE_CODE = DEAL.NMEMO_ISSUE_CODE
+    INNER JOIN FOS.NMEMO_BANK_PAYMENT PAYMENT
+        ON PAYMENT.BROKER_NUMBER = DEAL.NMEMO_BROKER_NUMBER
+       AND PAYMENT.BANK_DEAL_NUMBER = DEAL.DEAL_NUMBER
+       AND PAYMENT.NMEMO_ISSUE_CODE = DEAL.NMEMO_ISSUE_CODE
+       AND PAYMENT.DEAL_TRANSACTION_TYPE = DEAL.DEAL_TRANSACTION_TYPE
+       AND PAYMENT.STATUS_FLAG IN ('CONFIRMED','PREV')
+    GROUP BY DEAL.NMEMO_BROKER_NUMBER,PAYMENT.BANK_DEAL_NUMBER,PAYMENT.BANK_DEAL_SUB_NUMBER,NT.NMEMO_CURRENCY_CODE,NT.SETTLEMENT_CURRENCY
+)AS CURRENT_NOTIONAL
+ON CURRENT_NOTIONAL.CUSTOMER_NUMBER = UPD_DEAL.CUST_NUM
+AND CURRENT_NOTIONAL.SUB_ACCOUNT_NUMBER = UPD_DEAL.SB_ACCT_NUM
+AND CURRENT_NOTIONAL.DEAL_NUMBER = UPD_DEAL.DEAL_NUM
+AND CURRENT_NOTIONAL.DEAL_SUB_NUMBER = UPD_DEAL.DEAL_SB_NUM
+AND CURRENT_NOTIONAL.NOTIONAL_CCY = UPD_DEAL.NOTIONAL_CCY
+AND UPD_DEAL.BANK_CUST_FLAG = 'B'
+WHEN MATCHED THEN
+UPDATE SET UPD_DEAL.OUTSTANDING_NOTIONAL_AMT = CURRENT_NOTIONAL.CURRENT_NOTIONAL_AMT;
+
+--UPDATE OUTSTANDING_NOTIONAL_AMT,Add NMEMO_LEVERAGE_LEVEL --Add by Allen on 10Nov2020
+UPDATE INTERFACE.GM_COMMON_DEAL DEAL SET DEAL.OUTSTANDING_NOTIONAL_AMT = DEAL.OUTSTANDING_NOTIONAL_AMT * ( SELECT DECODE(NT.NMEMO_LEVERAGE_LEVEL,0,1,COALESCE(NT.NMEMO_LEVERAGE_LEVEL,1)) FROM FOS.NMEMO_TEMPLATE NT
+    WHERE NT.NMEMO_ISSUE_CODE = DEAL.TEMPLATE_ISSUE_CODE )
+WHERE DEAL.BANK_CUST_FLAG = 'B';
+
+--UPDATE NOTIONAL_AMT,Add NMEMO_LEVERAGE_LEVEL --Add by Allen on 10Nov2020
+UPDATE INTERFACE.GM_COMMON_DEAL DEAL SET DEAL.NOTIONAL_AMT = DEAL.NOTIONAL_AMT * ( SELECT DECODE(NT.NMEMO_LEVERAGE_LEVEL,0,1,COALESCE(NT.NMEMO_LEVERAGE_LEVEL,1)) FROM FOS.NMEMO_TEMPLATE NT
+    WHERE NT.NMEMO_ISSUE_CODE = DEAL.TEMPLATE_ISSUE_CODE )
+WHERE DEAL.BANK_CUST_FLAG = 'B';
+
+-- update KNOCKOUT_DT
+SET ld_err_pos = 'Position: update KNOCKOUT_DT for broker';
+MERGE INTO INTERFACE.GM_COMMON_DEAL UPD_ND USING
+(
+    SELECT
+        DEAL.NMEMO_BROKER_NUMBER AS CUSTOMER_NUMBER
+        ,'0001' AS SUB_ACCOUNT_NUMBER
+        ,DEAL.DEAL_NUMBER
+        ,PAYMENT.BANK_DEAL_SUB_NUMBER AS DEAL_SUB_NUMBER
+        ,PAYMENT.FIXING_DATE AS KNOCKOUT_DT
+    FROM FOS.NMEMO_BROKER_DEAL DEAL
+    INNER JOIN FOS.NMEMO_BANK_PAYMENT PAYMENT -- PRIMARY KEY (FIXING_DATE, FIXING_EVENT_TYPE, NMEMO_BANK_DEAL_NUMBER, NMEMO_BANK_DEAL_SUB_NUMBER)
+        ON PAYMENT.BROKER_NUMBER = DEAL.NMEMO_BROKER_NUMBER
+       AND PAYMENT.BANK_DEAL_NUMBER = DEAL.DEAL_NUMBER
+       AND PAYMENT.NMEMO_ISSUE_CODE = DEAL.NMEMO_ISSUE_CODE
+       AND PAYMENT.DEAL_TRANSACTION_TYPE = DEAL.DEAL_TRANSACTION_TYPE
+       AND PAYMENT.STATUS_FLAG IN ('CONFIRMED','PREV')
+       AND PAYMENT.FIXING_EVENT_TYPE = 'ER'
+) AS KNOCKOUT ON (
+    KNOCKOUT.CUSTOMER_NUMBER = UPD_ND.CUST_NUM
+    and KNOCKOUT.SUB_ACCOUNT_NUMBER = UPD_ND.SB_ACCT_NUM
+    and KNOCKOUT.DEAL_NUMBER = UPD_ND.DEAL_NUM
+    and KNOCKOUT.DEAL_SUB_NUMBER = UPD_ND.DEAL_SB_NUM
+    AND UPD_ND.BANK_CUST_FLAG = 'B'
+)
+WHEN MATCHED THEN
+UPDATE SET UPD_ND.KNOCKOUT_DT = KNOCKOUT.KNOCKOUT_DT;
+
+--Update DEPOSIT_LINKED_FLAG, TOTAL_INT_AMT
+SET ld_err_pos = 'Position: update DEPOSIT_LINKED_FLAG, TOTAL_INT_AMT for broker';
+MERGE INTO INTERFACE.GM_COMMON_DEAL UPD_ND USING
+(
+    SELECT
+        NBD.NMEMO_BROKER_NUMBER AS CUSTOMER_NUMBER
+        ,'0001' AS SUB_ACCOUNT_NUMBER
+        ,NBD.DEAL_NUMBER
+        ,0 AS DEAL_SUB_NUMBER
+        ,'Y' AS DEPOSIT_LINKED_FLAG
+        ,CASE WHEN COALESCE(DEPO.DEPO_STYLE,'') = 'ANNUAL' THEN COALESCE(DEAL.NOTIONAL_AMT,0) * (COALESCE(DEPO.DEPO_LEVEL,0)/100) * ((days(DEAL.FIXING_DT) - days(DEAL.VALUE_DT))/365)
+              WHEN COALESCE(DEPO.DEPO_STYLE,'') = 'PERIOD' THEN COALESCE(DEAL.NOTIONAL_AMT,0) * (COALESCE(DEPO.DEPO_LEVEL,0)/100)
+              ELSE 0 END AS TOTAL_INT_AMT
+    FROM FOS.NMEMO_BROKER_DEAL NBD
+    INNER JOIN INTERFACE.GM_COMMON_DEAL DEAL
+        ON NBD.NMEMO_BROKER_NUMBER = DEAL.CUST_NUM
+       AND NBD.DEAL_NUMBER = DEAL.DEAL_NUM
+       AND NBD.NMEMO_ISSUE_CODE = DEAL.TEMPLATE_ISSUE_CODE
+    INNER JOIN FOS.NMEMO_TEMPLATE_DEPO DEPO
+        ON DEPO.NMEMO_ISSUE_CODE = NBD.NMEMO_ISSUE_CODE
+) AS DEPOSIT ON (
+    DEPOSIT.CUSTOMER_NUMBER = UPD_ND.CUST_NUM
+    AND DEPOSIT.SUB_ACCOUNT_NUMBER = UPD_ND.SB_ACCT_NUM
+    AND DEPOSIT.DEAL_NUMBER = UPD_ND.DEAL_NUM
+    AND DEPOSIT.DEAL_SUB_NUMBER = UPD_ND.DEAL_SB_NUM
+    AND UPD_ND.BANK_CUST_FLAG = 'B'
+)
+WHEN MATCHED THEN
+UPDATE SET UPD_ND.DEPOSIT_LINKED_FLAG = DEPOSIT.DEPOSIT_LINKED_FLAG,
+           UPD_ND.TOTAL_INT_AMT = DEPOSIT.TOTAL_INT_AMT;
+
+--Update Underlying Fields
+SET ld_err_pos = 'Position: update Underlying Fields for broker';
+MERGE INTO INTERFACE.GM_COMMON_DEAL gcd
+USING
+(
+    SELECT tgcd.DEAL_NUM,tgcd.CUST_NUM,tgcd.SB_ACCT_NUM,tgcd.DEAL_SB_NUM,tgcd.PROD_TYPE,tgcd.ASSET_CLASS
+        ,NLU.UNDERLYING_ISSUE_CODE       AS UNDL_ISSUE_CDE
+        ,NLU.UNDERLYING_CURRENCY_CODE    AS UNDL_ISSUE_CRNCY_CDE
+        ,SI.REUTERS_CDE                  AS UNDL_REUTERS_CDE
+        ,NT.NMEMO_ISIN_CODE              AS UNDL_ISIN_CDE
+        ,SI.SHARE_CTRY_CDE               AS UNDL_CTRY_CDE
+    FROM INTERFACE.GM_COMMON_DEAL tgcd
+    INNER JOIN FOS.NMEMO_BROKER_DEAL ND
+        ON tgcd.DEAL_NUM = ND.DEAL_NUMBER
+       AND tgcd.CUST_NUM = ND.NMEMO_BROKER_NUMBER
+       AND tgcd.SB_ACCT_NUM = '0001'
+       AND tgcd.DEAL_SB_NUM = 0
+       AND tgcd.TEMPLATE_ISSUE_CODE = ND.NMEMO_ISSUE_CODE
+    INNER JOIN FOS.NMEMO_TEMPLATE NT
+        ON ND.NMEMO_ISSUE_CODE = NT.NMEMO_ISSUE_CODE
+    INNER JOIN FOS.NMEMO_LEG NL
+        ON NT.NMEMO_ISSUE_CODE = NL.NMEMO_ISSUE_CODE
+    INNER JOIN FOS.NMEMO_LEG_UNDERLYING NLU
+        ON NL.NMEMO_ISSUE_CODE = NLU.NMEMO_ISSUE_CODE
+       AND NL.NMEMO_LEG_NUMBER = NLU.NMEMO_LEG_NUMBER
+    LEFT JOIN INTERFACE.SHARE_ISSUE SI
+        ON SI.SHARE_ISSUE_CDE = NLU.UNDERLYING_ISSUE_CODE
+    INNER JOIN SESSION.UNDERLYING_COUNT UC
+        ON UC.NMEMO_ISSUE_CODE = NT.NMEMO_ISSUE_CODE
+       AND UC.TOTAL_COUNT = 1
+    WHERE ND.ACTIVE_FLAG = 'A'
+      AND NT.ACTIVE_FLAG = 'A'
+      AND NLU.ACTIVE_FLAG = 'A'
+      AND NL.ACTIVE_FLAG = 'A'
+      AND NT.ASSET_TYPE IN ('EQ','NX')
+)AS tgcd
+    ON tgcd.DEAL_NUM = gcd.DEAL_NUM
+   AND tgcd.CUST_NUM = gcd.CUST_NUM
+   AND tgcd.SB_ACCT_NUM = gcd.SB_ACCT_NUM
+   AND tgcd.DEAL_SB_NUM = gcd.DEAL_SB_NUM
+   AND tgcd.PROD_TYPE = gcd.PROD_TYPE
+   AND tgcd.ASSET_CLASS = gcd.ASSET_CLASS
+   AND gcd.BANK_CUST_FLAG = 'B'
+WHEN MATCHED THEN
+    UPDATE SET gcd.UNDL_ISSUE_CDE = tgcd.UNDL_ISSUE_CDE, gcd.UNDL_ISSUE_CRNCY_CDE = tgcd.UNDL_ISSUE_CRNCY_CDE, gcd.UNDL_REUTERS_CDE = tgcd.UNDL_REUTERS_CDE
+              ,gcd.UNDL_ISIN_CDE = tgcd.UNDL_ISIN_CDE, gcd.UNDL_CTRY_CDE = tgcd.UNDL_CTRY_CDE;
+
+Update INTERFACE.GM_COMMON_DEAL set UNDL_ISSUE_CRNCY_CDE = '' where UNDL_ISSUE_CRNCY_CDE is NULL;
+UPDATE INTERFACE.GM_COMMON_DEAL SET MTM_CCY = PREM_CCY WHERE MTM_CCY IS NULL OR MTM_CCY = ''; --Amended by Nancy on 30Dec2020
+--[Added by Nancy on 30Dec2020 start
+UPDATE INTERFACE.GM_COMMON_DEAL CLOSE_DEAL
+SET (CLOSE_DEAL.MTM_CCY,CLOSE_DEAL.OUTSTANDING_NOTIONAL_AMT) = (SELECT OPEN_DEAL.MTM_CCY,OPEN_DEAL.OUTSTANDING_NOTIONAL_AMT FROM INTERFACE.GM_COMMON_DEAL OPEN_DEAL
+                                                                  WHERE OPEN_DEAL.OPT_POSN_TYPE = 'O'
+                                                                    AND OPEN_DEAL.DEAL_NUM = CLOSE_DEAL.OPEN_DEAL_NUM
+                                                                    AND OPEN_DEAL.DEAL_SB_NUM = CLOSE_DEAL.OPEN_DEAL_SB_NUM
+                                                                    AND OPEN_DEAL.CUST_NUM = CLOSE_DEAL.CUST_NUM
+                                                                    AND OPEN_DEAL.SB_ACCT_NUM = CLOSE_DEAL.SB_ACCT_NUM
+                                                                    AND OPEN_DEAL.ASSET_CLASS = CLOSE_DEAL.ASSET_CLASS)
+WHERE CLOSE_DEAL.OPT_POSN_TYPE = 'C'
+AND EXISTS (SELECT 1 FROM INTERFACE.GM_COMMON_DEAL OPEN_DEAL
+            WHERE OPEN_DEAL.OPT_POSN_TYPE = 'O'
+              AND OPEN_DEAL.DEAL_NUM = CLOSE_DEAL.OPEN_DEAL_NUM
+              AND OPEN_DEAL.DEAL_SB_NUM = CLOSE_DEAL.OPEN_DEAL_SB_NUM
+              AND OPEN_DEAL.CUST_NUM = CLOSE_DEAL.CUST_NUM
+              AND OPEN_DEAL.SB_ACCT_NUM = CLOSE_DEAL.SB_ACCT_NUM
+              AND OPEN_DEAL.ASSET_CLASS = CLOSE_DEAL.ASSET_CLASS);
+--Added by Nancy on 30Dec2020 end]
+
+UPDATE INTERFACE.GM_COMMON_DEAL set ADVANCE_PURPOSE_CODE = '' where ADVANCE_PURPOSE_CODE is NULL;
+
+UPDATE INTERFACE.GM_COMMON_DEAL COMMON_DEAL SET LINK_DEAL_NUM = 0, LINK_DEAL_SB_NUM = 0
+WHERE COMMON_DEAL.ASSET_CLASS IN ('FX','FI','EQ','MX','CT') AND COMMON_DEAL.LINK_DEAL_NUM IS NULL; --Amend by Allen on 23Oct2020
+-- WHERE COMMON_DEAL.ASSET_CLASS IN ('FX','FI','EQ','MX','CD') AND COMMON_DEAL.LINK_DEAL_NUM IS NULL;
+
+CALL INTERFACE.PR_PROCEDURE_LOG('GENERIC_MEMO_TRANSFORM', ld_procedure_name, 'INFO', 'end insert data to INTERFACE.GM_COMMON_DEAL');
+
+end
+
+@
+
+
+
+
+
+
+
+  --------------------------------
+
+
+
+CREATE PROCEDURE INTERFACE.x()
+-- DB2_SYNTAX_FIX: added empty parameter list for no-argument procedure.
+SPECIFIC x
+LANGUAGE SQL
+
+
+BEGIN
+
+    DECLARE SQLCODE             INT DEFAULT 0;
+    DECLARE ld_message_text     VARCHAR(512);
+    DECLARE ld_err_pos          VARCHAR(1000);
+    DECLARE ld_error_message    VARCHAR(512);
+    DECLARE ld_procedure_name   VARCHAR(100) DEFAULT 'INTERFACE.PR_TRANSFORM_GM_COMMON_DEAL_EXT';
+    DECLARE ls_local_ccy_code   VARCHAR(3);
+    DECLARE ls_region_code      VARCHAR(3);
+    DECLARE ld_biz_date         DATE;
+
+    -- Exception handling when there is error
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        GET DIAGNOSTICS EXCEPTION 1 ld_message_text = MESSAGE_TEXT;
+
+        -- if SQLSTATE = 57011(transaction log for the database is full), cannot update or insert until commit.
+        COMMIT;
+        VALUES (ld_procedure_name || ' failed. ' || ld_err_pos || '. Details:' || ld_message_text) INTO ld_error_message;
+        IF (SUBSTR(ld_message_text, 1, 8) <> 'SQL0438N') THEN -- DB2_SYNTAX_FIX: normalized not-equal operator
+            CALL INTERFACE.PR_PROCEDURE_LOG('GENERIC_MEMO_TRANSFORM', ld_procedure_name, 'ERROR', ld_error_message);
+            commit;
+        END IF;
+        RESIGNAL SQLSTATE '88888';
+    END;
+
+    CALL INTERFACE.PR_PROCEDURE_LOG('GENERIC_MEMO_TRANSFORM', ld_procedure_name, 'INFO', 'Start insert data to INTERFACE.GM_COMMON_DEAL_EXT');
+
+    SELECT REGION_CDE INTO ls_region_code FROM INTERFACE.SYS WHERE SYS_CDE = 'EFOS';
+
+    SET ls_local_ccy_code = INTERFACE.FN_GET_LOCAL_CURRENCY();
+    SET ld_biz_date = INTERFACE.FN_GET_CURRENT_BUSINESS_DATE();
+
+    IF EXISTS ( SELECT 1 FROM INTERFACE.GM_COMMON_DEAL_EXT FETCH FIRST 1 ROW ONLY ) THEN
+        DELETE FROM INTERFACE.GM_COMMON_DEAL_EXT;
+    END IF;
+
+    SET ld_err_pos = 'Position: insert client data to INTERFACE.GM_COMMON_DEAL_EXT ';
+    INSERT INTO INTERFACE.GM_COMMON_DEAL_EXT -- primary key (DEAL_NUM,CUST_NUM,SB_ACCT_NUM,DEAL_SB_NUM,PROD_TYPE,ASSET_CLASS)
+    (
+        ACTV_FLAG
+        ,DEAL_NUM
+        ,DEAL_SB_NUM
+        ,DEAL_COMP_CDE
+        ,DEAL_BRNCH_CDE
+        ,DEAL_TRAN_TYPE
+        ,CUST_NUM
+        ,SB_ACCT_NUM
+        ,DEAL_TYPE
+        ,PROD_TYPE
+        ,ASSET_CLASS
+        ,GROS_SETL_FLAG
+        ,PAY_INT_RATE_CDE
+        ,RECV_INT_RATE_CDE
+        ,PAY_UNDL_CCY_CDE --Added by Nancy on 28Dec2020
+        ,RECV_UNDL_CCY_CDE --Added by Nancy on 28Dec2020
+        ,PAY_INT_CAL_METH
+        ,RECV_INT_CAL_METH
+        ,PAY_MRGN_INT_RATE
+        ,RECV_MRGN_INT_RATE
+        ,PAY_RATE_FIXING_FREQUENCY
+        ,RECV_RATE_FIXING_FREQUENCY
+        ,PAY_NXT_RT_FIXING_DT
+        ,RECV_NXT_RT_FIXING_DT
+        ,PAY_SETL_FREQ
+        ,RECV_SETL_FREQ
+        ,PAY_NEXT_SETL_DT
+        ,RECV_NEXT_SETL_DT
+        ,SCH_START_DATE
+        ,SCH_END_DATE
+        ,PERIOD_NUMBER
+    )
+    SELECT
+        DISTINCT
+        ND.ACTIVE_FLAG                                      AS ACTV_FLAG
+        ,ND.DEAL_NUMBER                                     AS DEAL_NUM
+        ,ND.DEAL_SUB_NUMBER                                 AS DEAL_SB_NUM
+        ,ND.DEAL_COMPANY_CODE                               AS DEAL_COMP_CDE
+        ,ND.DEAL_BRANCH_CODE                                AS DEAL_BRNCH_CDE
+        ,CASE WHEN ND.DEAL_TRANSACTION_TYPE = 'O' THEN 'S' ELSE 'P' END AS DEAL_TRAN_TYPE -- ND.CONSIDERATION_AMOUNT > 0 client rec premium,client sell, <0 client pay premium, client buy
+        ,ND.CUSTOMER_NUMBER                                 AS CUST_NUM
+        ,ND.SUB_ACCOUNT_NUMBER                              AS SB_ACCT_NUM
+        ,'MM'                                               AS PROD_TYPE
+        ,'MM'                                               AS DEAL_TYPE
+        --,CASE WHEN NT.ASSET_TYPE IN ('FX','EQ','FI','IR','CD') THEN NT.ASSET_TYPE
+        ,CASE WHEN NT.ASSET_TYPE IN ('FX','EQ','FI','IR','CT') THEN NT.ASSET_TYPE --Amend by Allen on 23Oct2020
+              WHEN NT.ASSET_TYPE IN ('NX') THEN 'EQ'
+              WHEN NT.ASSET_TYPE IN ('CD') THEN 'CT' --Add by Allen on 23Oct2020
+              ELSE 'MX'
+         END                                                AS ASSET_CLASS
+        ,'0'                                                AS GROS_SETL_FLAG
+        ,CASE WHEN LENGTH(TRIM(NLUPAY.UNDERLYING_ISSUE_CODE)) > 4 THEN SUBSTR(NLUPAY.UNDERLYING_ISSUE_CODE,1,2)||RIGHT(NLUPAY.UNDERLYING_ISSUE_CODE,2) ELSE NLUPAY.UNDERLYING_ISSUE_CODE END AS PAY_INT_RATE_CDE --?
+        ,CASE WHEN LENGTH(TRIM(NLUREC.UNDERLYING_ISSUE_CODE)) > 4 THEN SUBSTR(NLUREC.UNDERLYING_ISSUE_CODE,1,2)||RIGHT(NLUREC.UNDERLYING_ISSUE_CODE,2) ELSE NLUREC.UNDERLYING_ISSUE_CODE END AS RECV_INT_RATE_CDE --?
+        ,NLUPAY.UNDERLYING_CURRENCY_CODE                    AS PAY_UNDL_CCY_CDE --Added by Nancy on 28Dec2020
+        ,NLUREC.UNDERLYING_CURRENCY_CODE                    AS RECV_UNDL_CCY_CDE --Added by Nancy on 28Dec2020
+        ,'1'                                                AS PAY_INT_CAL_METH --TO DO?
+        ,'1'                                                AS RECV_INT_CAL_METH --TO DO?
+        ,CASE WHEN TRIM(NLUPAY.UNDERLYING_ISSUE_CODE) = 'FIX' THEN NLUPAY.UNDERLYING_INITIAL_SPOT ELSE 0 END AS PAY_MRGN_INT_RATE
+        ,CASE WHEN TRIM(NLUREC.UNDERLYING_ISSUE_CODE) = 'FIX' THEN NLUREC.UNDERLYING_INITIAL_SPOT ELSE 0 END AS RECV_MRGN_INT_RATE
+        ,CASE --WHEN NLFSEXTPAY.FREQUENCY = 'MONTHLY'      THEN 1    --Amended by Loiter on 22Jan2021
+              --WHEN NLFSEXTPAY.FREQUENCY = 'QUARTERLY'    THEN 3    --Amended by Loiter on 22Jan2021
+              --WHEN NLFSEXTPAY.FREQUENCY = 'SEMI-ANNUALLY' THEN 6   --Amended by Loiter on 22Jan2021
+              --WHEN NLFSEXTPAY.FREQUENCY = 'ANNUALLY'     THEN 12   --Amended by Loiter on 22Jan2021
+              WHEN NLFSEXTPAY.FREQUENCY = 'MONTHLY'        THEN '1'
+              WHEN NLFSEXTPAY.FREQUENCY = 'QUARTERLY'      THEN '3'
+              WHEN NLFSEXTPAY.FREQUENCY = 'SEMI-ANNUALLY'  THEN '6'
+              WHEN NLFSEXTPAY.FREQUENCY = 'ANNUALLY'       THEN 'A'
+              --ELSE 0 END
+              ELSE '0' END                                  AS PAY_RATE_FIXING_FREQUENCY --Amended by Nancy on 02Feb2021
+        ,CASE --WHEN NLFSEXTREC.FREQUENCY = 'MONTHLY'      THEN 1    --Amended by Loiter on 22Jan2021
+              --WHEN NLFSEXTREC.FREQUENCY = 'QUARTERLY'    THEN 3    --Amended by Loiter on 22Jan2021
+              --WHEN NLFSEXTREC.FREQUENCY = 'SEMI-ANNUALLY' THEN 6   --Amended by Loiter on 22Jan2021
+              --WHEN NLFSEXTREC.FREQUENCY = 'ANNUALLY'     THEN 12   --Amended by Loiter on 22Jan2021
+              WHEN NLFSEXTREC.FREQUENCY = 'MONTHLY'        THEN '1'
+              WHEN NLFSEXTREC.FREQUENCY = 'QUARTERLY'      THEN '3'
+              WHEN NLFSEXTREC.FREQUENCY = 'SEMI-ANNUALLY'  THEN '6'
+              WHEN NLFSEXTREC.FREQUENCY = 'ANNUALLY'       THEN 'A'
+              --ELSE 0 END
+              ELSE '0' END                                  AS REC_RATE_FIXING_FREQUENCY --Amended by Nancy on 02Feb2021
+        ,NLFSPAY.END_DATE                                   AS PAY_NXT_RT_FIXING_DT
+        ,NLFSREC.END_DATE                                   AS RECV_NXT_RT_FIXING_DT
+        --,COALESCE(NLFSPAY.NEXT_FIXING_DATE,NT.NMEMO_EXPIRY_DATE) AS PAY_NXT_RT_FIXING_DT --Amended by Nancy on 07Feb2021
+        --,COALESCE(NLFSREC.NEXT_FIXING_DATE,NT.NMEMO_EXPIRY_DATE) AS RECV_NXT_RT_FIXING_DT --Amended by Nancy on 07Feb2021
+        ,CASE WHEN NLPSEXTPAY.FREQUENCY = 'MONTHLY'         THEN 1
+              WHEN NLPSEXTPAY.FREQUENCY = 'QUARTERLY'       THEN 3
+              WHEN NLPSEXTPAY.FREQUENCY = 'SEMI-ANNUALLY'   THEN 6
+              WHEN NLPSEXTPAY.FREQUENCY = 'ANNUALLY'        THEN 12
+              ELSE 0 END                                    AS PAY_SETL_FREQ
+        ,CASE WHEN NLPSEXTREC.FREQUENCY = 'MONTHLY'         THEN 1
+              WHEN NLPSEXTREC.FREQUENCY = 'QUARTERLY'       THEN 3
+              WHEN NLPSEXTREC.FREQUENCY = 'SEMI-ANNUALLY'   THEN 6
+              WHEN NLPSEXTREC.FREQUENCY = 'ANNUALLY'        THEN 12
+              ELSE 0 END                                    AS RECV_SETL_FREQ
+        --,NLFSPAY.PAYMENT_DATE                              AS PAY_NEXT_SETL_DT
+        --,NLFSREC.PAYMENT_DATE                              AS RECV_NEXT_SETL_DT
+        --,COALESCE(NLFSPAY.START_DATE,NLFSREC.START_DATE)   AS SCH_START_DATE
+        --,COALESCE(NLFSPAY.END_DATE,NLFSREC.END_DATE)       AS SCH_END_DATE --client buy fix , sell float , LEG_WEIGHT > 0 client REC,in clinet view,bank pay int
+        --,COALESCE(NLFSPAY.PERIOD_NUMBER,NLFSREC.PERIOD_NUMBER) AS PERIOD_NUMBER
+        ,COALESCE(NLFSPAY.NEXT_SETTLE_DATE,NT.NMEMO_EXPIRY_DATE) AS PAY_NEXT_SETL_DT --Amended by Nancy on 07Feb2021
+        ,COALESCE(NLFSREC.NEXT_SETTLE_DATE,NT.NMEMO_EXPIRY_DATE) AS RECV_NEXT_SETL_DT --Amended by Nancy on 07Feb2021
+        ,COALESCE(NLFSPAY.LAST_FIXING_DATE,NLFSREC.LAST_FIXING_DATE,ND.NMEMO_VALUE_DATE) AS SCH_START_DATE --Amended by Nancy on 07Feb2021
+        ,COALESCE(NLFSPAY.NEXT_FIXING_DATE,NLFSREC.NEXT_FIXING_DATE,NT.NMEMO_EXPIRY_DATE) AS SCH_END_DATE --Amended by Nancy on 07Feb2021
+        ,0                                                  AS PERIOD_NUMBER --Amended by Nancy on 07Feb2021 no longer use this field
+    FROM FOS.NMEMO_DEAL ND
+    INNER JOIN FOS.NMEMO_TEMPLATE NT -- primary key (NMEMO_ISSUE_CODE)
+        ON NT.NMEMO_ISSUE_CODE = ND.NMEMO_ISSUE_CODE
+    INNER JOIN FOS.NMEMO_LEG NLPAY --PAY LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER)
+        ON ND.NMEMO_ISSUE_CODE = NLPAY.NMEMO_ISSUE_CODE
+       AND NLPAY.LEG_WEIGHT > 0
+    INNER JOIN FOS.NMEMO_LEG NLREC --REC LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER)
+        ON ND.NMEMO_ISSUE_CODE = NLREC.NMEMO_ISSUE_CODE
+       AND NLREC.LEG_WEIGHT < 0
+    INNER JOIN FOS.NMEMO_LEG_UNDERLYING NLUPAY --PAY LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER,UNDERLYING_ISSUE_CODE,EFFECTIVE_DATE)
+        ON NLPAY.NMEMO_ISSUE_CODE = NLUPAY.NMEMO_ISSUE_CODE
+       AND NLPAY.NMEMO_LEG_NUMBER = NLUPAY.NMEMO_LEG_NUMBER
+    INNER JOIN FOS.NMEMO_LEG_UNDERLYING NLUREC --REC LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER,UNDERLYING_ISSUE_CODE,EFFECTIVE_DATE)
+        ON NLREC.NMEMO_ISSUE_CODE = NLUREC.NMEMO_ISSUE_CODE
+       AND NLREC.NMEMO_LEG_NUMBER = NLUREC.NMEMO_LEG_NUMBER
+    --INNER JOIN FOS.NMEMO_LEG_FIXING_SCHEDULE NLFSPAY --PAY LEG --primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER,PERIOD_NUMBER) --Amended by Nancy on 01Dec 2020
+    /*INNER JOIN (SELECT * FROM
+    (
+        SELECT ROW_NUMBER() OVER (PARTITION BY NMEMO_ISSUE_CODE, NMEMO_LEG_NUMBER ORDER BY END_DATE ASC) AS ROW_NUM, A.* FROM FOS.NMEMO_LEG_FIXING_SCHEDULE A WHERE END_DATE >= ld_biz_date
+        UNION
+        SELECT ROW_NUMBER() OVER (PARTITION BY NMEMO_ISSUE_CODE, NMEMO_LEG_NUMBER ORDER BY END_DATE DESC) AS ROW_NUM, FINAL_PERIOD.* FROM FOS.NMEMO_LEG_FIXING_SCHEDULE FINAL_PERIOD WHERE END_DATE < ld_biz_date
+            AND (FINAL_PERIOD.NMEMO_ISSUE_CODE,'N') IN (SELECT ND.NMEMO_ISSUE_CODE, GCD.FINAL_FIXING_FLAG FROM INTERFACE.GM_COMMON_DEAL GCD,FOS.NMEMO_DEAL ND
+                                                        WHERE GCD.DEAL_NUM = ND.DEAL_NUMBER
+                                                          AND GCD.CUST_NUM = ND.CUSTOMER_NUMBER
+                                                          AND GCD.SB_ACCT_NUM = ND.SUB_ACCOUNT_NUMBER
+                                                          AND GCD.DEAL_SB_NUM = ND.DEAL_SUB_NUMBER
+                                                          AND GCD.TEMPLATE_ISSUE_CODE = ND.NMEMO_ISSUE_CODE
+                                                          AND GCD.ASSET_CLASS = 'IR')
+            AND NOT EXISTS (SELECT 1 FROM FOS.NMEMO_LEG_FIXING_SCHEDULE A WHERE A.END_DATE >= ld_biz_date AND FINAL_PERIOD.NMEMO_ISSUE_CODE = A.NMEMO_ISSUE_CODE AND FINAL_PERIOD.NMEMO_LEG_NUMBER = A.NMEMO_LEG_NUMBER )
+    )
+    WHERE ROW_NUM = 1) NLFSPAY --Keep data for one period
+    ON NLFSPAY.NMEMO_ISSUE_CODE = NLPAY.NMEMO_ISSUE_CODE
+    AND NLFSPAY.NMEMO_LEG_NUMBER = NLPAY.NMEMO_LEG_NUMBER*/
+
+    -- SUPPLEMENTED/DB2_SYNTAX_FIX: rebuilt the missing / malformed client fixing-date joins (screenshots around lines 218-238) into valid DB2 nested-table syntax.
+    LEFT JOIN (
+        SELECT *
+        FROM (
+            SELECT ROW_NUMBER() OVER (
+                       PARTITION BY CUSTOMER_NUMBER,SUB_ACCOUNT_NUMBER,DEAL_NUMBER,DEAL_SUB_NUMBER,NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER
+                       ORDER BY NEXT_FIXING_DATE DESC
+                   ) AS ROW_NUM,
+                   A.*
+            FROM FOS.NMEMO_FIXING_DATE_DETAIL_EXT A
+        ) AS X
+        WHERE ROW_NUM = 1
+    ) NLFSPAY --Keep data for one period
+        ON NLFSPAY.CUSTOMER_NUMBER = ND.CUSTOMER_NUMBER
+       AND NLFSPAY.SUB_ACCOUNT_NUMBER = ND.SUB_ACCOUNT_NUMBER
+       AND NLFSPAY.DEAL_NUMBER = ND.DEAL_NUMBER
+       AND NLFSPAY.DEAL_SUB_NUMBER = ND.DEAL_SUB_NUMBER
+       AND NLFSPAY.NMEMO_ISSUE_CODE = NLPAY.NMEMO_ISSUE_CODE
+       AND NLFSPAY.NMEMO_LEG_NUMBER = NLPAY.NMEMO_LEG_NUMBER
+    INNER JOIN FOS.NMEMO_LEG_FIXING_SCHEDULE_EXT NLFSEXTPAY --PAY LEG -- primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER)
+        ON NLUPAY.NMEMO_ISSUE_CODE = NLFSEXTPAY.NMEMO_ISSUE_CODE --Amended by Nancy on 07Feb2021
+       AND NLUPAY.NMEMO_LEG_NUMBER = NLFSEXTPAY.NMEMO_LEG_NUMBER --Amended by Nancy on 07Feb2021
+    -- SUPPLEMENTED/DB2_SYNTAX_FIX: legacy FOS.NMEMO_LEG_FIXING_SCHEDULE join was visible only as a commented block; kept inactive by using current *_EXT join below.
+    LEFT JOIN (
+        SELECT *
+        FROM (
+            SELECT ROW_NUMBER() OVER (
+                       PARTITION BY CUSTOMER_NUMBER,SUB_ACCOUNT_NUMBER,DEAL_NUMBER,DEAL_SUB_NUMBER,NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER
+                       ORDER BY NEXT_FIXING_DATE DESC
+                   ) AS ROW_NUM,
+                   A.*
+            FROM FOS.NMEMO_FIXING_DATE_DETAIL_EXT A
+        ) AS X
+        WHERE ROW_NUM = 1
+    ) NLFSREC --Keep data for one period
+        ON NLFSREC.CUSTOMER_NUMBER = ND.CUSTOMER_NUMBER
+       AND NLFSREC.SUB_ACCOUNT_NUMBER = ND.SUB_ACCOUNT_NUMBER
+       AND NLFSREC.DEAL_NUMBER = ND.DEAL_NUMBER
+       AND NLFSREC.DEAL_SUB_NUMBER = ND.DEAL_SUB_NUMBER
+       AND NLFSREC.NMEMO_ISSUE_CODE = NLREC.NMEMO_ISSUE_CODE
+       AND NLFSREC.NMEMO_LEG_NUMBER = NLREC.NMEMO_LEG_NUMBER
+    INNER JOIN FOS.NMEMO_LEG_FIXING_SCHEDULE_EXT NLFSEXTREC --REC LEG -- primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER)
+        ON NLUREC.NMEMO_ISSUE_CODE = NLFSEXTREC.NMEMO_ISSUE_CODE --Amended by Nancy on 07Feb2021
+       AND NLUREC.NMEMO_LEG_NUMBER = NLFSEXTREC.NMEMO_LEG_NUMBER --Amended by Nancy on 07Feb2021
+    INNER JOIN FOS.NMEMO_LEG_PAYMENT_SCHEDULE_EXT NLPSEXTPAY --PAY LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER)
+        ON NLUPAY.NMEMO_ISSUE_CODE = NLPSEXTPAY.NMEMO_ISSUE_CODE --Amended by Nancy on 07Feb2021
+       AND NLUPAY.NMEMO_LEG_NUMBER = NLPSEXTPAY.NMEMO_LEG_NUMBER --Amended by Nancy on 07Feb2021
+    INNER JOIN FOS.NMEMO_LEG_PAYMENT_SCHEDULE_EXT NLPSEXTREC --REC LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER)
+        ON NLUREC.NMEMO_ISSUE_CODE = NLPSEXTREC.NMEMO_ISSUE_CODE --Amended by Nancy on 07Feb2021
+       AND NLUREC.NMEMO_LEG_NUMBER = NLPSEXTREC.NMEMO_LEG_NUMBER --Amended by Nancy on 07Feb2021
+    WHERE ND.ACTIVE_FLAG = 'A' AND NT.ACTIVE_FLAG = 'A' AND ND.DEAL_TRANSACTION_TYPE IN ('O','C') AND NT.ASSET_TYPE = 'IR';
+
+-- broker side
+SET ld_err_pos = 'Position: insert into INTERFACE.GM_COMMON_DEAL_EXT for broker';
+INSERT INTO INTERFACE.GM_COMMON_DEAL_EXT
+(
+    ACTV_FLAG
+    ,DEAL_NUM
+    ,DEAL_SB_NUM
+    ,DEAL_COMP_CDE
+    ,DEAL_BRNCH_CDE
+    ,DEAL_TRAN_TYPE
+    ,CUST_NUM
+    ,SB_ACCT_NUM
+    ,DEAL_TYPE
+    ,PROD_TYPE
+    ,ASSET_CLASS
+    ,GROS_SETL_FLAG
+    ,PAY_INT_RATE_CDE
+    ,RECV_INT_RATE_CDE
+    ,PAY_UNDL_CCY_CDE --Added by Nancy on 28Dec2020
+    ,RECV_UNDL_CCY_CDE --Added by Nancy on 28Dec2020
+    ,PAY_INT_CAL_METH
+    ,RECV_INT_CAL_METH
+    ,PAY_MRGN_INT_RATE
+    ,RECV_MRGN_INT_RATE
+    ,PAY_RATE_FIXING_FREQUENCY
+    ,RECV_RATE_FIXING_FREQUENCY
+    ,PAY_NXT_RT_FIXING_DT
+    ,RECV_NXT_RT_FIXING_DT
+    ,PAY_SETL_FREQ
+    ,RECV_SETL_FREQ
+    ,PAY_NEXT_SETL_DT
+    ,RECV_NEXT_SETL_DT
+    ,SCH_START_DATE
+    ,SCH_END_DATE
+    ,PERIOD_NUMBER
+)
+SELECT
+    DISTINCT
+    BROKER_ND.ACTIVE_FLAG                                AS ACTV_FLAG
+    ,BROKER_ND.DEAL_NUMBER                               AS DEAL_NUM
+    ,0                                                   AS DEAL_SB_NUM
+    ,CASE WHEN ls_region_code = 'SG' THEN '68' WHEN ls_region_code = 'HK' THEN '63' END
+                                                         AS DEAL_COMP_CDE
+    ,CASE WHEN ls_region_code = 'SG' THEN
+        CASE WHEN ls_local_ccy_code = NT.SETTLEMENT_CURRENCY THEN '02' ELSE '03' END
+        WHEN ls_region_code = 'HK' THEN '02' END         AS DEAL_BRNCH_CDE
+    ,CASE WHEN BROKER_ND.DEAL_TRANSACTION_TYPE = 'O' THEN 'P' ELSE 'S' END
+                                                         AS DEAL_TRAN_TYPE --bank view CONSIDERATION_AMOUNT < 0 --bank pay , bank purchase
+    ,BROKER_ND.NMEMO_BROKER_NUMBER                       AS CUST_NUM
+    ,'0001'                                              AS SB_ACCT_NUM
+    ,'MM'                                                AS PROD_TYPE
+    ,'MM'                                                AS DEAL_TYPE
+    --,CASE WHEN NT.ASSET_TYPE IN ('FX','EQ','FI','IR','CD') THEN NT.ASSET_TYPE
+    ,CASE WHEN NT.ASSET_TYPE IN ('FX','EQ','FI','IR','CT') THEN NT.ASSET_TYPE --Amend by Allen on 23Oct2020
+          WHEN NT.ASSET_TYPE IN ('NX') THEN 'EQ'
+          WHEN NT.ASSET_TYPE IN ('CD') THEN 'CT' --Add by Allen on 23Oct2020
+          ELSE 'MX' END                                  AS ASSET_CLASS
+    ,'0'                                                 AS GROS_SETL_FLAG
+    ,CASE WHEN LENGTH(TRIM(NLUPAY.UNDERLYING_ISSUE_CODE)) > 4 THEN SUBSTR(NLUPAY.UNDERLYING_ISSUE_CODE,1,2)||RIGHT(NLUPAY.UNDERLYING_ISSUE_CODE,2) ELSE NLUPAY.UNDERLYING_ISSUE_CODE END AS PAY_INT_RATE_CDE --?
+    ,CASE WHEN LENGTH(TRIM(NLUREC.UNDERLYING_ISSUE_CODE)) > 4 THEN SUBSTR(NLUREC.UNDERLYING_ISSUE_CODE,1,2)||RIGHT(NLUREC.UNDERLYING_ISSUE_CODE,2) ELSE NLUREC.UNDERLYING_ISSUE_CODE END AS RECV_INT_RATE_CDE --?
+    ,NLUPAY.UNDERLYING_CURRENCY_CODE                     AS PAY_UNDL_CCY_CDE --Added by Nancy on 28Dec2020
+    ,NLUREC.UNDERLYING_CURRENCY_CODE                     AS RECV_UNDL_CCY_CDE --Added by Nancy on 28Dec2020
+    ,'1'                                                 AS PAY_INT_CAL_METH --TO DO?
+    ,'1'                                                 AS RECV_INT_CAL_METH --TO DO?
+    ,CASE WHEN TRIM(NLUPAY.UNDERLYING_ISSUE_CODE) = 'FIX' THEN NLUPAY.UNDERLYING_INITIAL_SPOT ELSE 0 END AS PAY_MRGN_INT_RATE
+    ,CASE WHEN TRIM(NLUREC.UNDERLYING_ISSUE_CODE) = 'FIX' THEN NLUREC.UNDERLYING_INITIAL_SPOT ELSE 0 END AS RECV_MRGN_INT_RATE
+    ,CASE --WHEN NLFSEXTPAY.FREQUENCY = 'MONTHLY' THEN 1      --Amended by Loiter on 22Jan2021
+          --WHEN NLFSEXTPAY.FREQUENCY = 'QUARTERLY' THEN 3    --Amended by Loiter on 22Jan2021
+          --WHEN NLFSEXTPAY.FREQUENCY = 'SEMI-ANNUALLY' THEN 6 --Amended by Loiter on 22Jan2021
+          --WHEN NLFSEXTPAY.FREQUENCY = 'ANNUALLY' THEN 12    --Amended by Loiter on 22Jan2021
+          WHEN NLFSEXTPAY.FREQUENCY = 'MONTHLY' THEN '1'
+          WHEN NLFSEXTPAY.FREQUENCY = 'QUARTERLY' THEN '3'
+          WHEN NLFSEXTPAY.FREQUENCY = 'SEMI-ANNUALLY' THEN '6'
+          WHEN NLFSEXTPAY.FREQUENCY = 'ANNUALLY' THEN 'A'
+          --ELSE 0 END
+          ELSE '0' END                                  AS PAY_RATE_FIXING_FREQUENCY --Amended by Nancy on 02Feb2021
+    ,CASE --WHEN NLFSEXTREC.FREQUENCY = 'MONTHLY' THEN 1       --Amended by Loiter on 22Jan2021
+          --WHEN NLFSEXTREC.FREQUENCY = 'QUARTERLY' THEN 3     --Amended by Loiter on 22Jan2021
+          --WHEN NLFSEXTREC.FREQUENCY = 'SEMI-ANNUALLY' THEN 6 --Amended by Loiter on 22Jan2021
+          --WHEN NLFSEXTREC.FREQUENCY = 'ANNUALLY' THEN 12     --Amended by Loiter on 22Jan2021
+          WHEN NLFSEXTREC.FREQUENCY = 'MONTHLY' THEN '1'
+          WHEN NLFSEXTREC.FREQUENCY = 'QUARTERLY' THEN '3'
+          WHEN NLFSEXTREC.FREQUENCY = 'SEMI-ANNUALLY' THEN '6'
+          WHEN NLFSEXTREC.FREQUENCY = 'ANNUALLY' THEN 'A'
+          --ELSE 0 END
+          ELSE '0' END                                  AS RECV_RATE_FIXING_FREQUENCY --Amended by Nancy on 02Feb2021
+    --,NLFSPAY.END_DATE                                  AS PAY_NXT_RT_FIXING_DT
+    --,NLFSREC.END_DATE                                  AS RECV_NXT_RT_FIXING_DT
+    ,COALESCE(NLFSPAY.NEXT_FIXING_DATE,NT.NMEMO_EXPIRY_DATE)
+                                                         AS PAY_NXT_RT_FIXING_DT --Amended by Nancy on 07Feb2021
+    ,COALESCE(NLFSREC.NEXT_FIXING_DATE,NT.NMEMO_EXPIRY_DATE)
+                                                         AS RECV_NXT_RT_FIXING_DT --Amended by Nancy on 07Feb2021
+    ,CASE WHEN NLPSEXTPAY.FREQUENCY = 'MONTHLY' THEN 1
+          WHEN NLPSEXTPAY.FREQUENCY = 'QUARTERLY' THEN 3
+          WHEN NLPSEXTPAY.FREQUENCY = 'SEMI-ANNUALLY' THEN 6
+          WHEN NLPSEXTPAY.FREQUENCY = 'ANNUALLY' THEN 12
+          ELSE 0 END                                    AS PAY_SETL_FREQ
+    ,CASE WHEN NLPSEXTREC.FREQUENCY = 'MONTHLY' THEN 1
+          WHEN NLPSEXTREC.FREQUENCY = 'QUARTERLY' THEN 3
+          WHEN NLPSEXTREC.FREQUENCY = 'SEMI-ANNUALLY' THEN 6
+          WHEN NLPSEXTREC.FREQUENCY = 'ANNUALLY' THEN 12
+          ELSE 0 END                                    AS RECV_SETL_FREQ
+    --,NLFSPAY.PAYMENT_DATE                              AS PAY_NEXT_SETL_DT
+    --,NLFSREC.PAYMENT_DATE                              AS RECV_NEXT_SETL_DT
+    --,COALESCE(NLFSPAY.START_DATE,NLFSREC.START_DATE)   AS SCH_START_DATE
+    --,COALESCE(NLFSPAY.END_DATE,NLFSREC.END_DATE)       AS SCH_END_DATE --client buy fix , sell float , LEG_WEIGHT > 0 client REC,in clinet view,bank pay int
+    --,COALESCE(NLFSPAY.PERIOD_NUMBER,NLFSREC.PERIOD_NUMBER) AS PERIOD_NUMBER -- DB2_SYNTAX_FIX: kept whole legacy expression commented
+    ,COALESCE(NLFSPAY.NEXT_SETTLE_DATE,NT.NMEMO_EXPIRY_DATE)
+                                                         AS PAY_NEXT_SETL_DT --Amended by Nancy on 07Feb2021
+    ,COALESCE(NLFSREC.NEXT_SETTLE_DATE,NT.NMEMO_EXPIRY_DATE)
+                                                         AS RECV_NEXT_SETL_DT --Amended by Nancy on 07Feb2021
+    ,COALESCE(NLFSPAY.LAST_FIXING_DATE,NLFSREC.LAST_FIXING_DATE,BROKER_ND.NMEMO_VALUE_DATE)
+                                                         AS SCH_START_DATE --Amended by Nancy on 07Feb2021
+    ,COALESCE(NLFSPAY.NEXT_FIXING_DATE,NLFSREC.NEXT_FIXING_DATE,NT.NMEMO_EXPIRY_DATE)
+                                                         AS SCH_END_DATE --Amended by Nancy on 07Feb2021
+    ,0                                                   AS PERIOD_NUMBER --Amended by Nancy on 07Feb2021
+FROM FOS.NMEMO_BROKER_DEAL BROKER_ND --primary key (NMEMO_BROKER_NUMBER, DEAL_NUMBER, NMEMO_ISSUE_CODE, DEAL_TRANSACTION_TYPE)
+INNER JOIN FOS.NMEMO_TEMPLATE NT --primary key (NMEMO_ISSUE_CODE)
+    ON NT.NMEMO_ISSUE_CODE = BROKER_ND.NMEMO_ISSUE_CODE
+INNER JOIN FOS.NMEMO_LEG NLPAY --PAY LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER)
+    ON BROKER_ND.NMEMO_ISSUE_CODE = NLPAY.NMEMO_ISSUE_CODE
+   AND NLPAY.LEG_WEIGHT > 0
+INNER JOIN FOS.NMEMO_LEG NLREC --REC LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER)
+    ON BROKER_ND.NMEMO_ISSUE_CODE = NLREC.NMEMO_ISSUE_CODE
+   AND NLREC.LEG_WEIGHT < 0
+INNER JOIN FOS.NMEMO_LEG_UNDERLYING NLUPAY --PAY LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER,UNDERLYING_ISSUE_CODE,EFFECTIVE_DATE)
+    ON NLPAY.NMEMO_ISSUE_CODE = NLUPAY.NMEMO_ISSUE_CODE
+   AND NLPAY.NMEMO_LEG_NUMBER = NLUPAY.NMEMO_LEG_NUMBER
+INNER JOIN FOS.NMEMO_LEG_UNDERLYING NLUREC --REC LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER,UNDERLYING_ISSUE_CODE,EFFECTIVE_DATE)
+    ON NLREC.NMEMO_ISSUE_CODE = NLUREC.NMEMO_ISSUE_CODE
+   AND NLREC.NMEMO_LEG_NUMBER = NLUREC.NMEMO_LEG_NUMBER
+-- SUPPLEMENTED/DB2_SYNTAX_FIX: screenshots missed broker FROM/JOIN lines around 383-405; rebuilt from client pattern with BROKER_ND keys.
+LEFT JOIN (
+    SELECT *
+    FROM (
+        SELECT ROW_NUMBER() OVER (
+                   PARTITION BY CUSTOMER_NUMBER,SUB_ACCOUNT_NUMBER,DEAL_NUMBER,DEAL_SUB_NUMBER,NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER
+                   ORDER BY NEXT_FIXING_DATE DESC
+               ) AS ROW_NUM,
+               A.*
+        FROM FOS.NMEMO_FIXING_DATE_DETAIL_EXT A
+    ) AS X
+    WHERE ROW_NUM = 1
+) NLFSPAY --Keep data for one period
+    ON NLFSPAY.CUSTOMER_NUMBER = BROKER_ND.NMEMO_BROKER_NUMBER
+   AND NLFSPAY.SUB_ACCOUNT_NUMBER = '0001'
+   AND NLFSPAY.DEAL_NUMBER = BROKER_ND.DEAL_NUMBER
+   AND NLFSPAY.DEAL_SUB_NUMBER = 0
+   AND NLFSPAY.NMEMO_ISSUE_CODE = NLPAY.NMEMO_ISSUE_CODE
+   AND NLFSPAY.NMEMO_LEG_NUMBER = NLPAY.NMEMO_LEG_NUMBER
+INNER JOIN FOS.NMEMO_LEG_FIXING_SCHEDULE_EXT NLFSEXTPAY --PAY LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER)
+    ON NLUPAY.NMEMO_ISSUE_CODE = NLFSEXTPAY.NMEMO_ISSUE_CODE --Amended by Nancy on 07Feb2021
+   AND NLUPAY.NMEMO_LEG_NUMBER = NLFSEXTPAY.NMEMO_LEG_NUMBER --Amended by Nancy on 07Feb2021
+LEFT JOIN (
+    SELECT *
+    FROM (
+        SELECT ROW_NUMBER() OVER (
+                   PARTITION BY CUSTOMER_NUMBER,SUB_ACCOUNT_NUMBER,DEAL_NUMBER,DEAL_SUB_NUMBER,NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER
+                   ORDER BY NEXT_FIXING_DATE DESC
+               ) AS ROW_NUM,
+               A.*
+        FROM FOS.NMEMO_FIXING_DATE_DETAIL_EXT A
+    ) AS X
+    WHERE ROW_NUM = 1
+) NLFSREC --Keep data for one period
+    ON NLFSREC.CUSTOMER_NUMBER = BROKER_ND.NMEMO_BROKER_NUMBER
+   AND NLFSREC.SUB_ACCOUNT_NUMBER = '0001'
+   AND NLFSREC.DEAL_NUMBER = BROKER_ND.DEAL_NUMBER
+   AND NLFSREC.DEAL_SUB_NUMBER = 0
+   AND NLFSREC.NMEMO_ISSUE_CODE = NLREC.NMEMO_ISSUE_CODE
+   AND NLFSREC.NMEMO_LEG_NUMBER = NLREC.NMEMO_LEG_NUMBER
+INNER JOIN FOS.NMEMO_LEG_FIXING_SCHEDULE_EXT NLFSEXTREC --REC LEG --primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER)
+    ON NLUREC.NMEMO_ISSUE_CODE = NLFSEXTREC.NMEMO_ISSUE_CODE --Amended by Nancy on 07Feb2021
+   AND NLUREC.NMEMO_LEG_NUMBER = NLFSEXTREC.NMEMO_LEG_NUMBER --Amended by Nancy on 07Feb2021
+INNER JOIN FOS.NMEMO_LEG_PAYMENT_SCHEDULE_EXT NLPSEXTPAY --PAY LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER)
+    ON NLUPAY.NMEMO_ISSUE_CODE = NLPSEXTPAY.NMEMO_ISSUE_CODE --Amended by Nancy on 07Feb2021
+   AND NLUPAY.NMEMO_LEG_NUMBER = NLPSEXTPAY.NMEMO_LEG_NUMBER --Amended by Nancy on 07Feb2021
+INNER JOIN FOS.NMEMO_LEG_PAYMENT_SCHEDULE_EXT NLPSEXTREC --REC LEG primary key (NMEMO_ISSUE_CODE,NMEMO_LEG_NUMBER)
+    ON NLUREC.NMEMO_ISSUE_CODE = NLPSEXTREC.NMEMO_ISSUE_CODE --Amended by Nancy on 07Feb2021
+   AND NLUREC.NMEMO_LEG_NUMBER = NLPSEXTREC.NMEMO_LEG_NUMBER --Amended by Nancy on 07Feb2021
+WHERE BROKER_ND.ACTIVE_FLAG = 'A' AND NT.ACTIVE_FLAG = 'A' AND BROKER_ND.DEAL_TRANSACTION_TYPE IN ('O','C') AND NT.ASSET_TYPE = 'IR';
+
+CALL INTERFACE.PR_PROCEDURE_LOG('GENERIC_MEMO_TRANSFORM', ld_procedure_name, 'INFO', 'end insert data to INTERFACE.GM_COMMON_DEAL_EXT');
+
+end
+
+@
+
+
+------------------------------
+  
+CREATE OR REPLACE PROCEDURE INTERFACE.c()
+-- SUPPLEMENTED/DB2_SYNTAX_FIX: screenshots started around line 61; recreated no-argument CREATE PROCEDURE header from file name and the same pattern used by sibling procedures.
+SPECIFIC c
+LANGUAGE SQL
+
+BEGIN
+
+    DECLARE SQLCODE             INT DEFAULT 0;
+    DECLARE ld_message_text     VARCHAR(512);
+    DECLARE ld_err_pos          VARCHAR(1000);
+    DECLARE ld_error_message    VARCHAR(512);
+    DECLARE ld_procedure_name   VARCHAR(100) DEFAULT 'INTERFACE.PR_TRANSFORM_GM_COMMON_FIXING_DEAL';
+    DECLARE ld_last_biz_date    DATE;
+    DECLARE ld_biz_date         DATE;
+    DECLARE ls_local_ccy_code   VARCHAR(3);
+    DECLARE ls_region_code      VARCHAR(3);
+
+    -- SUPPLEMENTED/DB2_SYNTAX_FIX: exception handler reconstructed from sibling procedure style; required for complete SQL PL block.
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        GET DIAGNOSTICS EXCEPTION 1 ld_message_text = MESSAGE_TEXT;
+
+        COMMIT;
+        VALUES (ld_procedure_name || ' failed. ' || ld_err_pos || '. Details: ' || ld_message_text) INTO ld_error_message;
+        IF (SUBSTR(ld_message_text, 1, 8) <> 'SQL0438N') THEN
+            CALL INTERFACE.PR_PROCEDURE_LOG('GENERIC_MEMO_TRANSFORM', ld_procedure_name, 'ERROR', ld_error_message);
+            COMMIT;
+        END IF;
+        RESIGNAL SQLSTATE '88888';
+    END;
+
+    -- SUPPLEMENTED/DB2_SYNTAX_FIX: procedure setup reconstructed from visible sibling procedure and variables referenced in screenshots.
+    CALL INTERFACE.PR_PROCEDURE_LOG('GENERIC_MEMO_TRANSFORM', ld_procedure_name, 'INFO', 'Start insert data to INTERFACE.GM_COMMON_FIXING_DEAL');
+
+    SELECT LAST_BUS_DT, BUS_DT, REGION_CDE
+      INTO ld_last_biz_date, ld_biz_date, ls_region_code
+      FROM INTERFACE.SYS
+     WHERE SYS_CDE = 'EFOS';
+
+    SET ls_local_ccy_code = INTERFACE.FN_GET_LOCAL_CURRENCY();
+
+    IF EXISTS ( SELECT 1 FROM INTERFACE.GM_COMMON_FIXING_DEAL FETCH FIRST 1 ROW ONLY ) THEN
+        DELETE FROM INTERFACE.GM_COMMON_FIXING_DEAL;
+    END IF;
+
+    SET ld_err_pos = 'Position: insert client data to INTERFACE.GM_COMMON_FIXING_DEAL ';
+    INSERT INTO INTERFACE.GM_COMMON_FIXING_DEAL
+    (
+        ACTV_FLAG
+        ,DEAL_NUM
+        ,DEAL_SB_NUM
+
+    ,DEAL_COMP_CDE
+    ,DEAL_BRNCH_CDE
+    ,DEAL_TRAN_TYPE
+    ,CUST_NUM
+    ,SB_ACCT_NUM
+    ,DEAL_TYPE
+    ,PROD_TYPE
+    ,ASSET_CLASS
+    ,BANK_CUST_FLAG
+    ,FIXING_EVENT_TYPE
+    ,START_DT
+    ,END_DT
+    ,CASH_SETL_FLAG
+    ,INT_RATE
+    ,PAY_RECEIVE_FLAG
+    ,SETL_DT
+    ,SETL_CCY
+    ,SETL_AMT
+    ,BUY_CCY
+    ,BUY_AMT
+    ,MRK_RECV_SETL_DT
+    ,SELL_CCY
+    ,SELL_AMT
+    ,MRK_PAY_SETL_DT
+    ,CROS_DEAL_NUM
+    ,CROS_DEAL_SB_NUM
+    ,LINK_DEAL_TYPE
+    ,LINK_DEAL_NUMBER
+    ,LINK_DEAL_SUB_NUMBER
+    ,CREAT_TS
+    ,RVRSE_TS
+    ,UPDT_TS
+)
+select
+    PAYMENT.ACTIVE_FLAG                                      AS ACTV_FLAG
+    ,PAYMENT.NMEMO_DEAL_NUMBER                              AS DEAL_NUM        --fixing
+    ,PAYMENT.NMEMO_DEAL_SUB_NUMBER                          AS DEAL_SB_NUM
+    --,PAYMENT.DEAL_COMPANY_CODE                            AS DEAL_COMP_CDE
+    --,PAYMENT.DEAL_BRANCH_CODE                             AS DEAL_BRNCH_CDE
+    ,CASE WHEN ls_region_code = 'SG' THEN '68' WHEN ls_region_code = 'HK' THEN '63' END AS DEAL_COMP_CDE --Amended by Nancy on 04Jan2021
+    ,CASE WHEN ls_region_code = 'SG' THEN
+        CASE WHEN (ls_local_ccy_code = PAYMENT.PAY_CURRENCY_CODE OR ls_local_ccy_code = PAYMENT.RECEIVE_CURRENCY_CODE) THEN '02' ELSE '03' END
+        WHEN ls_region_code = 'HK' THEN '02' END             AS DEAL_BRNCH_CDE --Amended by Nancy on 04Jan2021
+    ,DEAL.DEAL_TRANSACTION_TYPE                              AS DEAL_TRAN_TYPE --'F'
+    ,PAYMENT.CUSTOMER_NUMBER                                 AS CUST_NUM
+    ,PAYMENT.SUB_ACCOUNT_NUMBER                              AS SB_ACCT_NUM
+    ,'MM'                                                    AS PROD_TYPE
+    ,'MM'                                                    AS DEAL_TYPE
+    --,CASE WHEN NMEMO_TEMPLATE.ASSET_TYPE IN ('FX','EQ','FI','IR','CD') THEN NMEMO_TEMPLATE.ASSET_TYPE
+    ,CASE WHEN NMEMO_TEMPLATE.ASSET_TYPE IN ('FX','EQ','FI','IR','CT') THEN NMEMO_TEMPLATE.ASSET_TYPE --Amend by Allen on 23Oct2020
+          WHEN NMEMO_TEMPLATE.ASSET_TYPE IN ('NX') THEN 'EQ'
+          WHEN NMEMO_TEMPLATE.ASSET_TYPE IN ('CD') THEN 'CT' --Add by Allen on 23Oct2020
+          ELSE 'MX'
+     END                                                     AS ASSET_CLASS
+    ,'C'                                                     AS BANK_CUST_FLAG --Client
+    ,PAYMENT.FIXING_EVENT_TYPE                               AS FIXING_EVENT_TYPE
+    ,PAYMENT.PERIOD_START_DATE                               AS START_DT
+    ,PAYMENT.FIXING_DATE                                     AS END_DT
+    ,CASE WHEN NMEMO_TEMPLATE.NMEMO_SETTLEMENT_TYPE = 'CASH' THEN 'Y' ELSE 'N' END AS CASH_SETL_FLAG
+    ,COALESCE(NLU.UNDERLYING_INITIAL_SPOT,0)                 AS INT_RATE
+    ,CASE WHEN COALESCE(PAYMENT.PAY_AMOUNT,0) > 0 AND PAYMENT.RECEIVE_AMOUNT IS NULL THEN 'P'     --client pay,bank rec
+          WHEN COALESCE(PAYMENT.RECEIVE_AMOUNT,0) > 0 AND PAYMENT.PAY_AMOUNT IS NULL THEN 'R'     --client rec,bank pay
+          ELSE '' END                                        AS PAY_RECEIVE_FLAG --bank view
+    ,PAYMENT.SETTLE_DATE                                     AS SETL_DT
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NULL THEN COALESCE(PAYMENT.PAY_CURRENCY_CODE, PAYMENT.RECEIVE_CURRENCY_CODE) END AS SETL_CCY
+    --[Amended by Jing on 23Jun2022 begin hot fix to long term fix
+    --,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NULL THEN COALESCE(PAYMENT.PAY_AMOUNT,PAYMENT.RECEIVE_AMOUNT,0) END AS SETL_AMT
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NULL THEN COALESCE(PAYMENT.PAY_AMOUNT,PAYMENT.RECEIVE_AMOUNT,0) ELSE 0 END AS SETL_AMT
+    --Amended by Jing on 23Jun2022 end]
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NOT NULL THEN PAYMENT.RECEIVE_CURRENCY_CODE END AS BUY_CCY
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NOT NULL THEN COALESCE(PAYMENT.RECEIVE_AMOUNT,0) END AS BUY_AMT
+    ,PAYMENT.RECEIVE_MARK_SETTLE_DATE                        AS MRK_RECV_SETL_DT
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NOT NULL THEN PAYMENT.PAY_CURRENCY_CODE END AS SELL_CCY
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NOT NULL THEN COALESCE(PAYMENT.PAY_AMOUNT,0) END AS SELL_AMT
+    ,PAYMENT.PAY_MARK_SETTLE_DATE                            AS MRK_PAY_SETL_DT
+    ,PAYMENT.DEAL_NUMBER                                     AS CROS_DEAL_NUM --original
+    ,PAYMENT.DEAL_SUB_NUMBER                                 AS CROS_DEAL_SB_NUM
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NOT NULL THEN '51'
+          WHEN PAYMENT.SHARE_DEAL_NUMBER IS NOT NULL THEN '76'
+          WHEN (PAYMENT.PAY_DEAL_NUMBER IS NOT NULL OR PAYMENT.RECEIVE_DEAL_NUMBER IS NOT NULL) THEN '04'
+          ELSE ''
+     END                                                     AS LINK_DEAL_TYPE
+    ,COALESCE(PAYMENT.FX_DEAL_NUMBER,PAYMENT.SHARE_DEAL_NUMBER,PAYMENT.PAY_DEAL_NUMBER,PAYMENT.RECEIVE_DEAL_NUMBER) AS LINK_DEAL_NUMBER
+    ,COALESCE(PAYMENT.FX_DEAL_SUB_NUMBER,PAYMENT.SHARE_DEAL_SUB_NUMBER,PAYMENT.PAY_DEAL_SUB_NUMBER,PAYMENT.RECEIVE_DEAL_SUB_NUMBER) AS LINK_DEAL_SUB_NUMBER
+    ,PAYMENT.CREATE_TIMESTAMP                                AS CREAT_TS
+    ,PAYMENT.REVERSE_TIMESTAMP                               AS RVRSE_TS
+    ,PAYMENT.UPDATE_TIMESTAMP                                AS UPDT_TS
+FROM FOS.NMEMO_PAYMENT PAYMENT
+JOIN FOS.NMEMO_DEAL DEAL --primary key (CUSTOMER_NUMBER,SUB_ACCOUNT_NUMBER,PRODUCT_TYPE,DEAL_NUMBER,DEAL_SUB_NUMBER)
+    ON PAYMENT.CUSTOMER_NUMBER     = DEAL.CUSTOMER_NUMBER
+   AND PAYMENT.SUB_ACCOUNT_NUMBER  = DEAL.SUB_ACCOUNT_NUMBER
+   AND PAYMENT.PRODUCT_TYPE        = DEAL.PRODUCT_TYPE
+   AND PAYMENT.DEAL_NUMBER         = DEAL.DEAL_NUMBER
+   AND PAYMENT.DEAL_SUB_NUMBER     = DEAL.DEAL_SUB_NUMBER
+JOIN FOS.NMEMO_TEMPLATE NMEMO_TEMPLATE
+    ON NMEMO_TEMPLATE.NMEMO_ISSUE_CODE = DEAL.NMEMO_ISSUE_CODE
+LEFT JOIN FOS.NMEMO_LEG_UNDERLYING NLU
+    ON NMEMO_TEMPLATE.NMEMO_ISSUE_CODE = NLU.NMEMO_ISSUE_CODE
+   AND NLU.UNDERLYING_CLASS_CODE = 'IR'
+   AND NLU.UNDERLYING_ISSUE_CODE = 'FIX'
+JOIN (
+    SELECT ROW_NUMBER() OVER (
+               PARTITION BY CUSTOMER_NUMBER,SUB_ACCOUNT_NUMBER,PRODUCT_TYPE,DEAL_NUMBER,DEAL_SUB_NUMBER,CREATE_DATE
+               ORDER BY FIXING_DATE DESC, COALESCE(REMAINING_SETTLEMENT_NOTIONAL,0) ASC, FIXING_EVENT_TYPE
+           ) AS ROW_NUM,
+           CUSTOMER_NUMBER,SUB_ACCOUNT_NUMBER,PRODUCT_TYPE,DEAL_NUMBER,DEAL_SUB_NUMBER,CREATE_DATE,FIXING_DATE,FIXING_EVENT_TYPE
+    FROM FOS.NMEMO_PAYMENT
+    WHERE REVERSE_TIMESTAMP IS NULL
+      AND CREATE_DATE > FIXING_DATE
+      AND STATUS_FLAG IN ('CONFIRMED','PREV')
+) FIXING --handle sameday multiple fixing
+    ON PAYMENT.CUSTOMER_NUMBER    = FIXING.CUSTOMER_NUMBER
+   AND PAYMENT.SUB_ACCOUNT_NUMBER = FIXING.SUB_ACCOUNT_NUMBER
+   AND PAYMENT.PRODUCT_TYPE       = FIXING.PRODUCT_TYPE
+   AND PAYMENT.DEAL_NUMBER        = FIXING.DEAL_NUMBER
+   AND PAYMENT.DEAL_SUB_NUMBER    = FIXING.DEAL_SUB_NUMBER
+   AND PAYMENT.FIXING_DATE        = FIXING.FIXING_DATE
+   AND PAYMENT.FIXING_EVENT_TYPE  = FIXING.FIXING_EVENT_TYPE
+   AND FIXING.ROW_NUM             = 1
+WHERE PAYMENT.ACTIVE_FLAG = 'A'
+  AND NMEMO_TEMPLATE.ACTIVE_FLAG = 'A'
+  AND PAYMENT.STATUS_FLAG IN ('CONFIRMED','PREV');
+
+-- broker side
+SET ld_err_pos = 'Position: insert broker data to INTERFACE.GM_COMMON_FIXING_DEAL ';
+INSERT INTO INTERFACE.GM_COMMON_FIXING_DEAL
+(
+    ACTV_FLAG
+    ,DEAL_NUM
+    ,DEAL_SB_NUM
+    ,DEAL_COMP_CDE
+    ,DEAL_BRNCH_CDE
+    ,DEAL_TRAN_TYPE
+    ,CUST_NUM
+    ,SB_ACCT_NUM
+    ,DEAL_TYPE
+    ,PROD_TYPE
+    ,ASSET_CLASS
+    ,BANK_CUST_FLAG
+    ,FIXING_EVENT_TYPE
+    ,START_DT
+    ,END_DT
+    ,CASH_SETL_FLAG
+    ,INT_RATE
+    ,PAY_RECEIVE_FLAG
+    ,SETL_DT
+    ,SETL_CCY
+    ,SETL_AMT
+    ,BUY_CCY
+    ,BUY_AMT
+    ,MRK_RECV_SETL_DT
+    ,SELL_CCY
+    ,SELL_AMT
+    ,MRK_PAY_SETL_DT
+    ,CROS_DEAL_NUM
+    ,CROS_DEAL_SB_NUM
+    ,LINK_DEAL_TYPE
+    ,LINK_DEAL_NUMBER
+    ,LINK_DEAL_SUB_NUMBER
+    ,CREAT_TS
+    ,RVRSE_TS
+    ,UPDT_TS
+    ,PAY_OUR_NOSTRO_NUMBER
+    ,RECEIVE_OUR_NOSTRO_NUMBER
+    ,PAY_THEIR_NOSTRO_NUMBER
+    ,RECEIVE_THEIR_NOSTRO_NUMBER
+)
+select
+    PAYMENT.ACTIVE_FLAG                                      AS ACTV_FLAG
+    ,PAYMENT.NMEMO_BANK_DEAL_NUMBER                         AS DEAL_NUM
+    ,PAYMENT.NMEMO_BANK_DEAL_SUB_NUMBER                     AS DEAL_SB_NUM
+    ,CASE WHEN ls_region_code = 'SG' THEN '68' WHEN ls_region_code = 'HK' THEN '63' END AS DEAL_COMP_CDE
+    ,CASE WHEN ls_region_code = 'SG' THEN
+        CASE WHEN ls_local_ccy_code = NMEMO_TEMPLATE.SETTLEMENT_CURRENCY THEN '02' ELSE '03' END -- DB2_SYNTAX_FIX: removed unmatched '(' from OCR
+        WHEN ls_region_code = 'HK' THEN '02' END             AS DEAL_BRNCH_CDE --Amended by Nancy on 04Jan2021
+    ,DEAL.DEAL_TRANSACTION_TYPE                              AS DEAL_TRAN_TYPE --'F'
+    ,PAYMENT.BROKER_NUMBER                                   AS CUST_NUM
+    ,'0001'                                                  AS SB_ACCT_NUM
+    ,'MM'                                                    AS PROD_TYPE
+    ,'MM'                                                    AS DEAL_TYPE
+    --,CASE WHEN NMEMO_TEMPLATE.ASSET_TYPE IN ('FX','EQ','FI','IR','CD') THEN NMEMO_TEMPLATE.ASSET_TYPE
+    ,CASE WHEN NMEMO_TEMPLATE.ASSET_TYPE IN ('FX','EQ','FI','IR','CT') THEN NMEMO_TEMPLATE.ASSET_TYPE --Amend by Allen on 23Oct2020
+          WHEN NMEMO_TEMPLATE.ASSET_TYPE IN ('NX') THEN 'EQ'
+          WHEN NMEMO_TEMPLATE.ASSET_TYPE IN ('CD') THEN 'CT' --Add by Allen on 23Oct2020
+          ELSE 'MX'
+     END                                                     AS ASSET_CLASS
+    ,'B'                                                     AS BANK_CUST_FLAG --Bank
+    ,PAYMENT.FIXING_EVENT_TYPE                               AS FIXING_EVENT_TYPE
+    ,PAYMENT.PERIOD_START_DATE                               AS START_DT
+    ,PAYMENT.FIXING_DATE                                     AS END_DT
+    ,CASE WHEN NMEMO_TEMPLATE.NMEMO_SETTLEMENT_TYPE = 'CASH' THEN 'Y' ELSE 'N' END AS CASH_SETL_FLAG
+    ,COALESCE(NLU.UNDERLYING_INITIAL_SPOT,0)                 AS INT_RATE
+    ,CASE WHEN COALESCE(PAYMENT.PAY_AMOUNT,0) > 0 AND PAYMENT.RECEIVE_AMOUNT IS NULL THEN 'P'
+          WHEN COALESCE(PAYMENT.RECEIVE_AMOUNT,0) > 0 AND PAYMENT.PAY_AMOUNT IS NULL THEN 'R'
+          ELSE '' END                                        AS PAY_RECEIVE_FLAG --'P' bank pay, 'R' bank rec
+    ,PAYMENT.SETTLE_DATE                                     AS SETL_DT
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NULL THEN COALESCE(PAYMENT.PAY_CURRENCY_CODE, PAYMENT.RECEIVE_CURRENCY_CODE) END AS SETL_CCY
+    --[Amended by Jing on 23Jun2022 begin hot fix to long term fix
+    --,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NULL THEN COALESCE(PAYMENT.PAY_AMOUNT,PAYMENT.RECEIVE_AMOUNT,0) END AS SETL_AMT
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NULL THEN COALESCE(PAYMENT.PAY_AMOUNT,PAYMENT.RECEIVE_AMOUNT,0) ELSE 0 END AS SETL_AMT
+    --Amended by Jing on 23Jun2022 end]
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NOT NULL THEN PAYMENT.RECEIVE_CURRENCY_CODE END AS BUY_CCY
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NOT NULL THEN COALESCE(PAYMENT.RECEIVE_AMOUNT,0) END AS BUY_AMT
+    ,CLIENT_PAYMENT.RECEIVE_MARK_SETTLE_DATE                 AS MRK_RECV_SETL_DT
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NOT NULL THEN PAYMENT.PAY_CURRENCY_CODE END AS SELL_CCY
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NOT NULL THEN COALESCE(PAYMENT.PAY_AMOUNT,0) END AS SELL_AMT
+    ,CLIENT_PAYMENT.PAY_MARK_SETTLE_DATE                     AS MRK_PAY_SETL_DT
+    ,PAYMENT.BANK_DEAL_NUMBER                                AS CROS_DEAL_NUM
+    ,PAYMENT.BANK_DEAL_SUB_NUMBER                            AS CROS_DEAL_SB_NUM
+    ,CASE WHEN PAYMENT.FX_DEAL_NUMBER IS NOT NULL THEN '51'
+          WHEN CLIENT_PAYMENT.SHARE_DEAL_NUMBER IS NOT NULL THEN '76'
+          WHEN (CLIENT_PAYMENT.PAY_DEAL_NUMBER IS NOT NULL OR CLIENT_PAYMENT.RECEIVE_DEAL_NUMBER IS NOT NULL) THEN '04'
+          ELSE ''
+     END                                                     AS LINK_DEAL_TYPE --TBC no share_deal_num in bank_payment
+    ,COALESCE(PAYMENT.FX_DEAL_NUMBER,CLIENT_PAYMENT.SHARE_DEAL_NUMBER) AS LINK_DEAL_NUMBER
+    ,COALESCE(PAYMENT.FX_DEAL_SUB_NUMBER,CLIENT_PAYMENT.SHARE_DEAL_SUB_NUMBER) AS LINK_DEAL_SUB_NUMBER
+    ,PAYMENT.CREATE_TIMESTAMP                                AS CREAT_TS
+    ,PAYMENT.REVERSE_TIMESTAMP                               AS RVRSE_TS
+    ,PAYMENT.UPDATE_TIMESTAMP                                AS UPDT_TS
+    ,PAYMENT.PAY_OUR_NOSTRO_NUMBER AS PAY_OUR_NOSTRO_NUMBER -- DB2_SYNTAX_FIX: qualified OCR-unqualified column
+    ,PAYMENT.RECEIVE_OUR_NOSTRO_NUMBER AS RECEIVE_OUR_NOSTRO_NUMBER -- DB2_SYNTAX_FIX: qualified OCR-unqualified column
+    ,PAYMENT.PAY_THEIR_NOSTRO_NUMBER AS PAY_THEIR_NOSTRO_NUMBER -- DB2_SYNTAX_FIX: qualified OCR-unqualified column
+    ,PAYMENT.RECEIVE_THEIR_NOSTRO_NUMBER AS RECEIVE_THEIR_NOSTRO_NUMBER -- DB2_SYNTAX_FIX: qualified OCR-unqualified column
+FROM FOS.NMEMO_BANK_PAYMENT PAYMENT --PRIMARY KEY (FIXING_DATE, FIXING_EVENT_TYPE, NMEMO_BANK_DEAL_NUMBER, NMEMO_BANK_DEAL_SUB_NUMBER)
+JOIN FOS.NMEMO_BROKER_DEAL DEAL --primary key (NMEMO_BROKER_NUMBER, DEAL_NUMBER, NMEMO_ISSUE_CODE, DEAL_TRANSACTION_TYPE)
+    ON PAYMENT.BROKER_NUMBER = DEAL.NMEMO_BROKER_NUMBER
+   AND PAYMENT.BANK_DEAL_NUMBER = DEAL.DEAL_NUMBER
+   AND PAYMENT.BANK_DEAL_SUB_NUMBER = DEAL.DEAL_SUB_NUMBER
+   AND PAYMENT.NMEMO_ISSUE_CODE = DEAL.NMEMO_ISSUE_CODE
+JOIN FOS.NMEMO_PAYMENT CLIENT_PAYMENT --PRIMARY KEY (CUSTOMER_NUMBER, SUB_ACCOUNT_NUMBER, PRODUCT_TYPE, DEAL_NUMBER, DEAL_SUB_NUMBER, FIXING_DATE, FIXING_EVENT_TYPE)
+    ON CLIENT_PAYMENT.NMEMO_BANK_DEAL_NUMBER = PAYMENT.NMEMO_BANK_DEAL_NUMBER
+   AND CLIENT_PAYMENT.NMEMO_BANK_DEAL_SUB_NUMBER = PAYMENT.NMEMO_BANK_DEAL_SUB_NUMBER
+JOIN FOS.NMEMO_TEMPLATE NMEMO_TEMPLATE
+    ON NMEMO_TEMPLATE.NMEMO_ISSUE_CODE = DEAL.NMEMO_ISSUE_CODE
+LEFT JOIN FOS.NMEMO_LEG_UNDERLYING NLU
+    ON NMEMO_TEMPLATE.NMEMO_ISSUE_CODE = NLU.NMEMO_ISSUE_CODE
+   AND NLU.UNDERLYING_CLASS_CODE = 'IR'
+   AND NLU.UNDERLYING_ISSUE_CODE = 'FIX'
+JOIN (
+    SELECT ROW_NUMBER() OVER (
+               PARTITION BY BROKER_NUMBER,BANK_DEAL_NUMBER,BANK_DEAL_SUB_NUMBER,CREATE_DATE
+               ORDER BY FIXING_DATE DESC, COALESCE(REMAINING_SETTLEMENT_NOTIONAL,0) ASC, FIXING_EVENT_TYPE
+           ) AS ROW_NUM,
+           NMEMO_BANK_DEAL_NUMBER,NMEMO_BANK_DEAL_SUB_NUMBER,BROKER_NUMBER,BANK_DEAL_NUMBER,FIXING_DATE,FIXING_EVENT_TYPE,CREATE_DATE -- DB2_SYNTAX_FIX: removed duplicate FIXING_DATE from OCR
+    FROM FOS.NMEMO_BANK_PAYMENT
+    WHERE REVERSE_TIMESTAMP IS NULL
+      AND CREATE_DATE > FIXING_DATE
+      AND STATUS_FLAG IN ('CONFIRMED','PREV')
+) FIXING --handle sameday multiple fixing
+    ON PAYMENT.FIXING_DATE = FIXING.FIXING_DATE
+   AND PAYMENT.FIXING_EVENT_TYPE = FIXING.FIXING_EVENT_TYPE
+   AND PAYMENT.NMEMO_BANK_DEAL_NUMBER = FIXING.NMEMO_BANK_DEAL_NUMBER
+   AND PAYMENT.NMEMO_BANK_DEAL_SUB_NUMBER = FIXING.NMEMO_BANK_DEAL_SUB_NUMBER
+   AND FIXING.ROW_NUM = 1
+WHERE PAYMENT.ACTIVE_FLAG = 'A'
+  AND NMEMO_TEMPLATE.ACTIVE_FLAG = 'A'
+  AND PAYMENT.STATUS_FLAG IN ('CONFIRMED','PREV');
+
+CALL INTERFACE.PR_PROCEDURE_LOG('GENERIC_MEMO_TRANSFORM', ld_procedure_name, 'INFO', 'End insert data to INTERFACE.GM_COMMON_FIXING_DEAL');
+
+end
+
+@
