@@ -1,4 +1,4 @@
-powershell -ExecutionPolicy Bypass -File D:\check\db-relationship-extractor2_handoff.ps1 -OutputDir D:\check\db-relationship-extractor2 -Force
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Unblock-File -LiteralPath 'C:\db_check\db-relationship-extractor2_handoff.ps1'"
 
 
-powershell -ExecutionPolicy Bypass -File D:\check\db-relationship-extractor2_handoff.ps1 -OutputDir D:\check\db-relationship-extractor2 -VerifyOnly
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& 'C:\db_check\db-relationship-extractor2_handoff.ps1' -OutputDir 'C:\db_check\db-relationship-extractor2' -Force"
