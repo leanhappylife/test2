@@ -1,46 +1,50 @@
-## TXN Issues – Client Deal
+Hi Team,
 
-**1. Missing client deals**
-Four client deals are missing from the output:
-STEX_BOP209131730, STEX_BOP209131962, STEX_BOP209132079, STEX_BOP209131957.
+Thanks for the discussion today.
 
-**2. Incorrect NMEMO_PRICE**
-NMEMO_PRICE is 0. It should be -4 based on TOM Client Receive.
+As discussed, please find below the issues identified during SIT testing.
 
-**3. Other products included**
-The output contains non-HK-TRS products, such as fixed income, precious metal and shares. Please confirm whether this is expected.
+**1. Transaction File – Client Deals**
 
-**4. Incorrect settlement notional**
-SETTLEMENT_NOTIONAL is incorrect. For example, the expected value is 100,000 (1,000 × 100), but the output is -4,000.
+* Some client deals in the SIT test cases are missing from the transaction file.
+* `NMEMO_PRICE` is incorrect. The expected value is -4, but the transaction file shows 0.
+* The transaction file should only contain structured products. Fixed income, precious metal, and shares should not be included.
+* `SETTLEMENT_NOTIONAL` is incorrect. It should be calculated as Outstanding Quantity × Gross Price.
+* `SETTLEMENT_NOTIONAL_LEVERAGE` is incorrect. It should be calculated as Outstanding Quantity × Gross Price × Leverage.
+* `NMEMO_ISSUE_CODE` format is incorrect. It currently contains customer number + sub-account number + issue code, but it should only contain the issue code.
 
-## TXN Issues – Broker Deal
+**2. Transaction File – Broker Deals**
 
-**1. Incorrect broker field mapping**
-The broker fields are mapped incorrectly. Broker ID and type should be in AVQ_ORDER_ID and ORDER_TYPE. SUB_ACCOUNT_NUMBER should be blank.
+* Broker Order ID should be mapped to `AVQ_ORDER_ID`, Broker Order Type should be mapped to `ORDER_TYPE`, and `SUB_ACCOUNT_NUMBER` should be blank.
+* Some broker deals in the SIT test cases are missing from the transaction file.
+* `PREMIUM_AMOUNT` is incorrect. The TOM `CONSIDERATION_AMOUNT` is correct, but `PREMIUM_AMOUNT` in the transaction file is 0.
+* `NMEMO_ISSUE_CODE` is blank for the broker deals.
+* `SETTLEMENT_NOTIONAL` and `SETTLEMENT_NOTIONAL_LEVERAGE` should follow the same logic as client deals. If one broker deal is linked to multiple client deals, the values should be the sum of all related client deals.
 
-**2. Missing broker deals**
-Three broker deals are missing:
-STEX_BOPC209131737, STEX_BOPC209131969, STEX_BOPC209132085.
+**3. Transaction File Timing**
 
-**3. Incorrect PREMIUM_AMOUNT**
-PREMIUM_AMOUNT is 0. It should match TOM CONSIDERATION_AMOUNT, such as -3,000 or -18,000.
+* The transaction file is coming too late in UAT.
+* In production, we expect to receive the file at around 8 p.m., similar to the position file.
 
-**4. Missing NMEMO_ISSUE_CODE**
-NMEMO_ISSUE_CODE is blank. It should contain the correct issue code, such as NMA0080–NMA0095.
+**4. Position File**
 
-**5. Incorrect settlement notional**
-The broker settlement notional values do not match the TOM nominal values.
+* `SUB_ACCOUNT_NUMBER` is incorrect. It should contain only the last four digits, but currently it contains both the customer number and sub-account number.
+* `MEMO_PRICE` and `RATE` are incorrect. `MEMO_PRICE` should be Client Receive %, and `RATE` should be Gross Price.
+* Some `MEMO_ISSUE_CODE` and `MEMO_CURRENCY_CODE` values are blank.
+* As discussed in the previous meeting, we only need `CURRENT_HOLDING_NOMINAL`, which represents Outstanding Quantity. `OUTSTANDING_QUANTITY` and `CURRENT_HOLDING_NOMINAL_LEVERAGE` should be removed.
+* `SETTLEMENT_NOTIONAL_LEVERAGE` is blank and should be calculated as Outstanding Quantity × Gross Price × Leverage.
+* Some header names are incorrect:
 
-## POS Issues
+  * `MEMO_ISSUE_CODE` should be `NMEMO_ISSUE_CODE`
+  * `MEMO_CURRENCY_CODE` should be `NMEMO_CURRENCY_CODE`
+  * `MEMO_PRICE` should be `NMEMO_PRICE`
+* The header `META_TYP` should be changed to `META_TYPE`.
+* For `NMEMO_MATURITY_DATE`, TOM currently gets the value from `NMEMO_DELIVERY_DATE` in `FOS.NMEMO_TEMPLATE`. Please check whether this information can be provided by AVQ.
 
-**1. Incorrect SUB_ACCOUNT_NUMBER**
-SUB_ACCOUNT_NUMBER is incorrect. It should contain only the last four digits, for example 0001.
+**5. File Delivery**
 
-**2. Incorrect MEMO_PRICE and RATE**
-MEMO_PRICE should be -4, and RATE should be 100.
+* This time we only received the transaction file and the position file. We have not received the fixing file yet.
 
-**3. Additional position records**
-The output contains 55 records, but the test data contains 32 positions. Some additional records also have blank issue code or currency fields.
+Please fix the above issues and resend the updated transaction and position files. Please also send us the fixing file.
 
-**4. Same quantity values**
-OUTSTANDING_QUANTITY, CURRENT_HOLDING_NOMINAL and CURRENT_HOLDING_NOMINAL_LEVERAGE have the same values. Please confirm whether this is expected.
+Thanks.
